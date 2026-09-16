@@ -1,0 +1,40 @@
+# Scheduled Break Trade
+
+## Purpose
+
+Watch an M1/M5/M15 close past a user level, arm on the next valid red/green candle, place an SL (with primary SL→LIMIT fallback on Invalid price), optionally re-place the same SL once after a clean stop-out, and persist the full primary + `RETRY_*` lifecycle on one `scheduled_trades` document.
+
+## Routes
+
+- `POST /scheduled-trades` — create schedule on the selected international account
+- `GET /scheduled-trades` — list schedules for the selected account
+- `POST /scheduled-trades/{id}/cancel` — cancel while cancellable
+- `GET /scheduled-trades/{id}/events` — schedule event log
+
+Live snapshot field: `scheduled_trades` on `/ws/live`.
+
+## Status lifecycle
+
+Primary: `INITIATED` → `ARMED` → `ORDER_PLACED` → `ORDER_FILLED` → `TARGET_EXIT` | `STOP_EXIT` | `USER_EXIT` | `CANCELLED`
+
+Retry (same document, when `retryable_order=true`): `STOP_EXIT` → `RETRY_INITIATED` → `RETRY_ORDER_PLACED` → `RETRY_ORDER_FILLED` → `RETRY_*_EXIT` | `RETRY_CANCELLED`
+
+v1 retry places the **identical SL immediately** after stop-out (no second candle wait). `RETRY_ARMED` is reserved.
+
+## Placement
+
+| Leg | Order type | Invalid price |
+|-----|------------|---------------|
+| Primary | SL first via `place_pending_order_with_limit_fallback` | Fall back to LIMIT at same entry/SL/qty/target |
+| Retry | SL only via `place_pending_order` | No LIMIT fallback; surface error on schedule |
+
+## UI
+
+Positions → **Scheduled Trade** tab (`ScheduledTradePanel`): create form (Retryable order default **off**) + lifecycle list.
+
+## Implementation
+
+- Levels/helpers: `apps/backend-python/app/services/scheduled_trade_levels.py`
+- Runtime: `apps/backend-python/app/services/scheduled_trade_runtime.py`
+- Tick wiring: `market_data_stream` primary tick + post-reconcile sync
+- Frontend: `apps/frontend-react/src/components/scheduled-trade/ScheduledTradePanel.jsx`

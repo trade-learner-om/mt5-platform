@@ -1,0 +1,154 @@
+2026-07-21T10:13:03+0530 INFO [app.logging_config] Application logging configured | file=/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/logs/backend.log format=text level=INFO console=False
+2026-07-21T10:13:03+0530 INFO [test.logging_config] file-only-check
+2026-07-21T10:13:03+0530 INFO [app.trap_hunter] TEST_EVENT | SHORT | XAUUSD | {"trap_side": "SHORT", "broker_symbol": "XAUUSD", "event": "TEST_EVENT", "payload": {"entry": 1.0}}
+2026-07-21T10:13:03+0530 INFO [app.trap_hunter] TICK_ROUTE_MATCH | XAUUSD.i | {"run_key": "", "user_id": "user-1", "account_id": "acc-1", "requested_symbol": "XAUUSD", "broker_symbol": "XAUUSD.i", "display_symbol": "XAUUSD", "risk_amount": 100.0, "event": "TICK_ROUTE_MATCH", "payload": {"symbol_key": "XAUUSD.I", "account_id": "acc-1"}}
+2026-07-21T10:13:03+0530 INFO [app.trap_hunter] M5_BAR_OPEN | XAUUSD.i | {"run_key": "", "user_id": "user-1", "account_id": "acc-1", "requested_symbol": "XAUUSD", "broker_symbol": "XAUUSD.i", "display_symbol": "XAUUSD", "risk_amount": 100.0, "event": "M5_BAR_OPEN", "payload": {"bar_start": "2026-07-21T04:00:00+00:00", "open": 111.05}}
+2026-07-21T10:13:03+0530 INFO [app.trap_hunter] RUN_STARTED | XAUUSD.i | {"run_key": "acc-1:XAUUSD.I", "user_id": "user-1", "account_id": "acc-1", "requested_symbol": "XAUUSD", "broker_symbol": "XAUUSD.i", "display_symbol": "XAUUSD", "risk_amount": 100.0, "event": "RUN_STARTED", "payload": {"t1_partial_qty_pct": 0.0, "h4_high": 110.0, "h4_low": 90.0}}
+2026-07-21T10:13:03+0530 INFO [app.trap_hunter] RUN_STOPPED | XAUUSD.i | {"run_key": "acc-1:XAUUSD.I", "user_id": "user-1", "account_id": "acc-1", "requested_symbol": "XAUUSD", "broker_symbol": "XAUUSD.i", "display_symbol": "XAUUSD", "risk_amount": 100.0, "event": "RUN_STOPPED", "payload": {"close_position": false}}
+2026-07-21T10:13:03+0530 INFO [app.trap_hunter] PENDING_ORDER_CANCEL | XAUUSD | {"run_key": "", "user_id": "user-1", "account_id": "acc-1", "requested_symbol": "XAUUSD", "broker_symbol": "XAUUSD", "display_symbol": "XAUUSD", "risk_amount": 100.0, "event": "PENDING_ORDER_CANCEL", "payload": {"trap_side": "SHORT_TRAP", "order_id": "old-order"}}
+2026-07-21T10:13:03+0530 INFO [app.trap_hunter] PENDING_ORDER_PLACE | SHORT_TRAP | XAUUSD | {"run_key": "", "user_id": "user-1", "account_id": "acc-1", "requested_symbol": "XAUUSD", "broker_symbol": "XAUUSD", "display_symbol": "XAUUSD", "risk_amount": 100.0, "trap_side": "SHORT_TRAP", "state": "ARMED", "event": "PENDING_ORDER_PLACE", "payload": {"side": "SELL", "entry": 2650.0, "stop_loss": 2660.0, "quantity": 0.05}}
+2026-07-21T10:13:03+0530 INFO [app.trap_hunter] PENDING_ORDER_PLACED | SHORT_TRAP | XAUUSD | {"run_key": "", "user_id": "user-1", "account_id": "acc-1", "requested_symbol": "XAUUSD", "broker_symbol": "XAUUSD", "display_symbol": "XAUUSD", "risk_amount": 100.0, "trap_side": "SHORT_TRAP", "event": "PENDING_ORDER_PLACED", "payload": {"order_id": "order-456", "order_type": "SL", "fallback": null}}
+2026-07-21T10:13:03+0530 INFO [app.trap_hunter] PENDING_ORDER_PLACE | SHORT_TRAP | XAUUSD | {"run_key": "", "user_id": "user-1", "account_id": "acc-1", "requested_symbol": "XAUUSD", "broker_symbol": "XAUUSD", "display_symbol": "XAUUSD", "risk_amount": 100.0, "trap_side": "SHORT_TRAP", "state": "ARMED", "event": "PENDING_ORDER_PLACE", "payload": {"side": "SELL", "entry": 2650.0, "stop_loss": 2660.0, "quantity": 0.05}}
+2026-07-21T10:13:03+0530 INFO [app.trap_hunter] PENDING_ORDER_PLACED | SHORT_TRAP | XAUUSD | {"run_key": "", "user_id": "user-1", "account_id": "acc-1", "requested_symbol": "XAUUSD", "broker_symbol": "XAUUSD", "display_symbol": "XAUUSD", "risk_amount": 100.0, "trap_side": "SHORT_TRAP", "event": "PENDING_ORDER_PLACED", "payload": {"order_id": "order-123", "order_type": "SL", "fallback": null}}
+2026-07-21T10:13:03+0530 INFO [app.trap_hunter] PENDING_ORDER_PLACE | SHORT_TRAP | XAUUSD | {"run_key": "", "user_id": "user-1", "account_id": "acc-1", "requested_symbol": "XAUUSD", "broker_symbol": "XAUUSD", "display_symbol": "XAUUSD", "risk_amount": 100.0, "trap_side": "SHORT_TRAP", "state": "ARMED", "event": "PENDING_ORDER_PLACE", "payload": {"side": "SELL", "entry": 109.49, "stop_loss": 111.5, "quantity": 4.97}}
+2026-07-21T10:13:03+0530 INFO [app.trap_hunter] PENDING_ORDER_PLACED | SHORT_TRAP | XAUUSD | {"run_key": "", "user_id": "user-1", "account_id": "acc-1", "requested_symbol": "XAUUSD", "broker_symbol": "XAUUSD", "display_symbol": "XAUUSD", "risk_amount": 100.0, "trap_side": "SHORT_TRAP", "event": "PENDING_ORDER_PLACED", "payload": {"order_id": "order-789", "order_type": "SL", "fallback": null}}
+2026-07-25T14:50:02+0530 INFO [app.logging_config] Application logging configured | file=/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/logs/backend.log format=text level=INFO console=False
+2026-07-25T14:50:28+0530 INFO [app.logging_config] Application logging configured | file=/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/logs/backend.log format=text level=INFO console=False
+2026-07-25T14:50:28+0530 WARNING [app.services.trend_pilot_runtime] Trend Pilot reversal stop mismatch after SL sync | run_id=<MagicMock id='4644794256'> side=LONG expected=2390.0 broker=None
+2026-07-25T14:50:28+0530 INFO [app.trap_hunter] TICK_ROUTE_MATCH | XAUUSD | {"run_key": "", "user_id": "user-1", "account_id": "acc-a", "requested_symbol": "XAUUSD", "broker_symbol": "XAUUSD", "display_symbol": "XAUUSD", "risk_amount": 100.0, "event": "TICK_ROUTE_MATCH", "payload": {"symbol_key": "XAUUSD", "account_id": "acc-a", "feed_user_id": "user-1"}}
+2026-07-25T14:50:28+0530 INFO [app.trap_hunter] M5_BAR_OPEN | XAUUSD | {"run_key": "", "user_id": "user-1", "account_id": "acc-a", "requested_symbol": "XAUUSD", "broker_symbol": "XAUUSD", "display_symbol": "XAUUSD", "risk_amount": 100.0, "event": "M5_BAR_OPEN", "payload": {"bar_start": "2026-07-25T08:00:00+00:00", "open": 2400.05}}
+2026-07-25T14:50:28+0530 INFO [app.trap_hunter] TICK_ROUTE_MATCH | XAUUSD | {"run_key": "", "user_id": "user-1", "account_id": "acc-b", "requested_symbol": "XAUUSD", "broker_symbol": "XAUUSD", "display_symbol": "XAUUSD", "risk_amount": 100.0, "event": "TICK_ROUTE_MATCH", "payload": {"symbol_key": "XAUUSD", "account_id": "acc-b", "feed_user_id": "user-1"}}
+2026-07-25T14:50:28+0530 INFO [app.trap_hunter] M5_BAR_OPEN | XAUUSD | {"run_key": "", "user_id": "user-1", "account_id": "acc-b", "requested_symbol": "XAUUSD", "broker_symbol": "XAUUSD", "display_symbol": "XAUUSD", "risk_amount": 100.0, "event": "M5_BAR_OPEN", "payload": {"bar_start": "2026-07-25T08:00:00+00:00", "open": 2400.05}}
+2026-07-25T14:56:00+0530 INFO [app.logging_config] Application logging configured | file=/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/logs/backend.log format=text level=INFO console=False
+2026-07-25T14:58:30+0530 INFO [app.logging_config] Application logging configured | file=/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/logs/backend.log format=text level=INFO console=False
+2026-07-25T14:58:55+0530 INFO [app.logging_config] Application logging configured | file=/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/logs/backend.log format=text level=INFO console=False
+2026-07-26T20:17:26+0530 INFO [app.logging_config] Application logging configured | file=/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/logs/backend.log format=text level=INFO console=False
+2026-07-26T22:25:35+0530 INFO [app.logging_config] Application logging configured | file=/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/logs/backend.log format=text level=INFO console=False
+2026-07-26T22:25:36+0530 ERROR [app.services.metaapi_client] Unable to read local MT5 terminal state
+Traceback (most recent call last):
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 922, in get_terminal_state
+    await self._with_session(token, account_id, operation)
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 929, in _with_session
+    return await self._session_manager.run(token, account_id, operation)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 315, in run
+    return await asyncio.to_thread(self._run_sync, token, account_id, operation)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/concurrent/futures/thread.py", line 86, in run
+    result = ctx.run(self.task)
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/concurrent/futures/thread.py", line 73, in run
+    return fn(*args, **kwargs)
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 321, in _run_sync
+    return self._service._run_session_sync(token, account_id, operation)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 933, in _run_session_sync
+    raise LocalMT5Error("MetaTrader5 package is not installed.")
+app.services.metaapi_client.LocalMT5Error: MetaTrader5 package is not installed.
+2026-07-26T22:33:23+0530 INFO [app.logging_config] Application logging configured | file=/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/logs/backend.log format=text level=INFO console=False
+2026-07-26T22:33:23+0530 ERROR [app.services.metaapi_client] Unable to read local MT5 terminal state
+Traceback (most recent call last):
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 922, in get_terminal_state
+    await self._with_session(token, account_id, operation)
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 929, in _with_session
+    return await self._session_manager.run(token, account_id, operation)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 315, in run
+    return await asyncio.to_thread(self._run_sync, token, account_id, operation)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/concurrent/futures/thread.py", line 86, in run
+    result = ctx.run(self.task)
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/concurrent/futures/thread.py", line 73, in run
+    return fn(*args, **kwargs)
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 321, in _run_sync
+    return self._service._run_session_sync(token, account_id, operation)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 933, in _run_session_sync
+    raise LocalMT5Error("MetaTrader5 package is not installed.")
+app.services.metaapi_client.LocalMT5Error: MetaTrader5 package is not installed.
+2026-07-26T22:42:22+0530 INFO [app.logging_config] Application logging configured | file=/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/logs/backend.log format=text level=INFO console=False
+2026-07-26T22:42:22+0530 INFO [app.services.trend_pilot_runtime] Trend Pilot live quote fetch failed | run_id=<MagicMock id='4580130304'> error=MetaTrader5 package is not installed.
+2026-07-26T22:42:22+0530 ERROR [app.services.metaapi_client] Unable to read local MT5 terminal state
+Traceback (most recent call last):
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 922, in get_terminal_state
+    await self._with_session(token, account_id, operation)
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 929, in _with_session
+    return await self._session_manager.run(token, account_id, operation)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 315, in run
+    return await asyncio.to_thread(self._run_sync, token, account_id, operation)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/concurrent/futures/thread.py", line 86, in run
+    result = ctx.run(self.task)
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/concurrent/futures/thread.py", line 73, in run
+    return fn(*args, **kwargs)
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 321, in _run_sync
+    return self._service._run_session_sync(token, account_id, operation)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 933, in _run_session_sync
+    raise LocalMT5Error("MetaTrader5 package is not installed.")
+app.services.metaapi_client.LocalMT5Error: MetaTrader5 package is not installed.
+2026-07-26T22:42:22+0530 INFO [app.services.trend_pilot_runtime] Trend Pilot live quote fetch failed | run_id=<MagicMock id='4581889360'> error=MetaTrader5 package is not installed.
+2026-07-26T22:42:22+0530 INFO [app.services.trend_pilot_runtime] Trend Pilot live quote fetch failed | run_id=<MagicMock id='4582317360'> error=MetaTrader5 package is not installed.
+2026-07-26T22:42:22+0530 WARNING [app.services.trend_pilot_runtime] Trend Pilot reversal stop mismatch after SL sync | run_id=<MagicMock id='4583107152'> side=LONG expected=2390.0 broker=None
+2026-07-27T10:36:47+0530 INFO [app.logging_config] Application logging configured | file=/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/logs/backend.log format=text level=INFO console=False
+2026-07-27T10:36:47+0530 INFO [app.services.trend_pilot_runtime] Trend Pilot live quote fetch failed | run_id=<MagicMock id='4612238912'> error=MetaTrader5 package is not installed.
+2026-07-27T10:37:01+0530 INFO [app.logging_config] Application logging configured | file=/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/logs/backend.log format=text level=INFO console=False
+2026-07-28T11:14:56+0530 INFO [app.logging_config] Application logging configured | file=/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/logs/backend.log format=text level=INFO console=False
+2026-07-28T11:15:59+0530 INFO [app.services.trend_pilot_runtime] Trend Pilot close-mode bar close entry | run_id=<MagicMock id='4571989056'> side=LONG close=4025.0 entry=4022.0 fill=4024.0
+2026-07-28T11:15:59+0530 INFO [app.services.trend_pilot_runtime] Trend Pilot close-mode bar close entry | run_id=<MagicMock id='4571989392'> side=SHORT close=3979.0 entry=3981.0 fill=3979.0
+2026-07-28T11:15:59+0530 ERROR [app.services.metaapi_client] Unable to read local MT5 terminal state
+Traceback (most recent call last):
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 922, in get_terminal_state
+    await self._with_session(token, account_id, operation)
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 929, in _with_session
+    return await self._session_manager.run(token, account_id, operation)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 315, in run
+    return await asyncio.to_thread(self._run_sync, token, account_id, operation)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/concurrent/futures/thread.py", line 86, in run
+    result = ctx.run(self.task)
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/concurrent/futures/thread.py", line 73, in run
+    return fn(*args, **kwargs)
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 321, in _run_sync
+    return self._service._run_session_sync(token, account_id, operation)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 933, in _run_session_sync
+    raise LocalMT5Error("MetaTrader5 package is not installed.")
+app.services.metaapi_client.LocalMT5Error: MetaTrader5 package is not installed.
+2026-07-28T11:15:59+0530 ERROR [app.services.metaapi_client] Unable to read local MT5 terminal state
+Traceback (most recent call last):
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 922, in get_terminal_state
+    await self._with_session(token, account_id, operation)
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 929, in _with_session
+    return await self._session_manager.run(token, account_id, operation)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 315, in run
+    return await asyncio.to_thread(self._run_sync, token, account_id, operation)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/concurrent/futures/thread.py", line 86, in run
+    result = ctx.run(self.task)
+  File "/opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/concurrent/futures/thread.py", line 73, in run
+    return fn(*args, **kwargs)
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 321, in _run_sync
+    return self._service._run_session_sync(token, account_id, operation)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/arnabmondal/Documents/Playground/mt5-platform/fresh/mt5-platform/apps/backend-python/app/services/metaapi_client.py", line 933, in _run_session_sync
+    raise LocalMT5Error("MetaTrader5 package is not installed.")
+app.services.metaapi_client.LocalMT5Error: MetaTrader5 package is not installed.
+2026-07-28T11:15:59+0530 INFO [app.services.trend_pilot_runtime] Trend Pilot close-mode bar close entry | run_id=<MagicMock id='4572304384'> side=LONG close=4022.0 entry=4022.0 fill=4022.0
