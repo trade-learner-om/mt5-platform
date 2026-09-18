@@ -178,7 +178,7 @@ class MarketDataStreamManager:
         self._last_direct_reconcile_at = {}
         self._last_price_tick_at = {}
         self._mongo_outage_until = {}
-        self._tick_locks = {}
+        self._tick_locks: WeakKeyDictionary = WeakKeyDictionary()
         self._stream_ensure_locks: WeakKeyDictionary = WeakKeyDictionary()
         self._background_reconcile_tasks = {}
         self._background_reconcile_inflight = set()
@@ -240,15 +240,22 @@ class MarketDataStreamManager:
         return set(self._invalid_watchlist_symbols.get(user_id, set()))
 
     def _user_stream_lock(self, user_id: str) -> asyncio.Lock:
+        return self._lock_for_loop(self._stream_ensure_locks, user_id)
+
+    def _tick_lock_for(self, user_id: str) -> asyncio.Lock:
+        return self._lock_for_loop(self._tick_locks, user_id)
+
+    @staticmethod
+    def _lock_for_loop(store: WeakKeyDictionary, key: str) -> asyncio.Lock:
         loop = asyncio.get_running_loop()
-        loop_locks = self._stream_ensure_locks.get(loop)
+        loop_locks = store.get(loop)
         if loop_locks is None:
             loop_locks = {}
-            self._stream_ensure_locks[loop] = loop_locks
-        lock = loop_locks.get(user_id)
+            store[loop] = loop_locks
+        lock = loop_locks.get(key)
         if lock is None:
             lock = asyncio.Lock()
-            loop_locks[user_id] = lock
+            loop_locks[key] = lock
         return lock
 
     async def ensure_user_stream(self, db, user_id: str, on_update):
@@ -919,7 +926,7 @@ class MarketDataStreamManager:
 
     async def _process_tick_work(self, session_key: str, session: dict, price: dict):
         user_id = session["user_id"]
-        tick_lock = self._tick_locks.setdefault(user_id, asyncio.Lock())
+        tick_lock = self._tick_lock_for(user_id)
         async with tick_lock:
             await self._process_tick_work_locked(session_key, session, price)
 

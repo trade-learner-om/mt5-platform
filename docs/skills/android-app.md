@@ -2,13 +2,30 @@
 
 ## Purpose
 
-Maintain the native Android client in `apps/android-app` for direct access to the deployed SignalBridge backend.
+Native Kotlin/Jetpack Compose client in `apps/android-app` for the SignalBridge backend (not a WebView wrapper).
+
+## Connectivity
+
+Current production build defaults to:
+
+- REST: `https://api.signalbridge.in`
+- WebSocket: `wss://api.signalbridge.in/ws/live`
+
+LAN/host setup UI still exists for non-fixed builds. Prefer documenting the production fixed-host path unless changing `AppConfig`-equivalent Android host logic.
 
 ## Implementation
 
-The Android app is a Kotlin/Jetpack Compose project. It does not embed the React app in a WebView. The current build connects directly to the production backend:
+- OkHttp for REST and websocket.
+- Bottom navigation, compact cards, modal order sheets.
+- Trading sends `retryable_order` and `automatic_trade_management` on place.
+- Positions rows expand into `GET /orders/{id}/events` timelines.
+- Trap Reversal uses `/trap-reversal/*` (`StrategyScreens.kt` / related).
 
-- REST API: `https://api.signalbridge.in`
-- WebSocket: `wss://api.signalbridge.in/ws/live`
+## Known debt
 
-The app uses OkHttp for REST and websocket calls and mirrors the React mobile visual language with Compose cards, rounded controls, indigo/slate colors, and compact mobile tabs.
+Same as iOS: leftover `/gold-strategy/*` and `/trend-pilot/*` clients against removed backends. Do not restore those routes — delete or replace mobile callers when working in this area.
+
+## Related
+
+- iOS: `docs/skills/ios-app.md`
+- Orders: `docs/skills/trading-order-lifecycle.md`

@@ -27,4 +27,19 @@ The script starts FastAPI on `0.0.0.0:8000` and Vite on `0.0.0.0:5173` in separa
 
 Generated secrets are local development values stored in `apps/backend-python/.env`. Do not commit `.env`.
 
-When accessing from another machine, open `http://<server-lan-ip>:5173`. The frontend API helper uses the browser host by default, so it will call `http://<server-lan-ip>:8000` unless `VITE_API_BASE_URL` is explicitly set.
+Local web access defaults to:
+
+- UI: `http://localhost:5173`
+- API / WS: `http://localhost:8000` and `ws://localhost:8000` (via `apps/frontend-react/.env.development`)
+
+`apps/frontend-react/src/api.js` forces the local backend when the browser host is localhost/LAN, even if an older env still points at `api.signalbridge.in`.
+
+Restore production API from a local UI session — set in `apps/frontend-react/.env.local` (or temporarily in `.env.development`) and restart Vite:
+
+```env
+VITE_USE_PRODUCTION_API=true
+```
+
+Production builds still use `.env.production` (`https://api.signalbridge.in`). The production URL constant remains in `src/api.js` as `PRODUCTION_API_BASE`.
+
+When accessing from another machine on the LAN, open `http://<server-lan-ip>:5173`. The frontend rewrites the API host to that same LAN IP on port `8000` unless production mode is opted in.

@@ -21,7 +21,7 @@ It wraps:
 
 Always call `shutdown()` after each connection attempt so terminal resources are released.
 
-Live prices are polled once per second from subscribed symbols through local MT5 `symbol_info_tick()`. An MT5 Expert Advisor or bridge can also push ticks into backend websocket `WS /ws/mt5/ticks?secret=<account-secret>&account_id=<login-or-account-db-id>`. The account secret is generated per international MT5 account and shown in the web app under Manage Accounts. If an EA/bridge is used, it should send a message on every `OnTick()` event for subscribed symbols:
+Live prices are polled once per second from subscribed symbols through local MT5 `symbol_info_tick()`. Streaming connections are pooled in `LocalMT5StreamingPool`, which uses a `threading.Lock` for connection-dict mutations so `/ws/live` and watchlist refresh can share the pool across the FastAPI loop and the dedicated tick loop. An MT5 Expert Advisor or bridge can also push ticks into backend websocket `WS /ws/mt5/ticks?secret=<account-secret>&account_id=<login-or-account-db-id>`. The account secret is generated per international MT5 account and shown in the web app under Manage Accounts. If an EA/bridge is used, it should send a message on every `OnTick()` event for subscribed symbols:
 
 ```json
 { "symbol": "EURUSD", "bid": 1.08, "ask": 1.08002, "time": "2026-06-18T03:30:00Z" }

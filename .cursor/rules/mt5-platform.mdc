@@ -1,0 +1,20 @@
+---
+description: Core MT5 platform agent rules — Windows local runtime, read docs before coding, never expose MT5 credentials, thin routes / fat services.
+alwaysApply: true
+---
+
+# MT5 Platform
+
+Before coding, read `docs/context/project-context.md` and the matching files under `docs/skills/` (index: `docs/README.md`). Use `.cursor/skills/` wrappers for domain work.
+
+## Hard constraints
+
+- Backend runs on Windows with a local MetaTrader 5 terminal. Do not assume Docker for MT5.
+- Never store or expose plaintext app passwords or MT5 passwords (API, logs, frontend, errors).
+- Keep routes thin; put logic in services. Frontend API access in `src/services`; server state in React Query.
+- Update `docs/changelog/` after significant behavior changes.
+- Do not revive removed strategy routes (`/gold-strategy/*`, `/trend-pilot/*`, `/trap-hunter/*`, etc.).
+
+## Active strategies
+
+Trap Reversal, Master Break, Scheduled Break Trade only. Details in `docs/skills/automation.md`.

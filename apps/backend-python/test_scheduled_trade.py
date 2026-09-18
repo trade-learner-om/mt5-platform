@@ -41,10 +41,18 @@ class ScheduledTradeLevelsTests(unittest.TestCase):
         gold_big = {"high": 2650.0, "low": 2639.8, "open": 2649, "close": 2640}
         self.assertFalse(is_oversized_signal_candle(gold_ok, "XAUUSD"))
         self.assertTrue(is_oversized_signal_candle(gold_big, "XAUUSD"))
-        fx_ok = {"high": 1.10010, "low": 1.09900, "open": 1.10000, "close": 1.09910}
+        fx_ok = {"high": 1.10000, "low": 1.09920, "open": 1.09990, "close": 1.09930}
         fx_big = {"high": 1.10150, "low": 1.10000, "open": 1.10140, "close": 1.10010}
         self.assertFalse(is_oversized_signal_candle(fx_ok, "EURUSD"))
         self.assertTrue(is_oversized_signal_candle(fx_big, "EURUSD"))
+
+    def test_oversized_candle_respects_custom_max(self):
+        candle = {"high": 2650.0, "low": 2640.0, "open": 2649, "close": 2641}  # 100 pips gold
+        self.assertFalse(is_oversized_signal_candle(candle, "XAUUSD", max_pips=100))
+        self.assertTrue(is_oversized_signal_candle(candle, "XAUUSD", max_pips=99))
+        fx = {"high": 1.10100, "low": 1.10000, "open": 1.10090, "close": 1.10010}  # 10 pips
+        self.assertFalse(is_oversized_signal_candle(fx, "EURUSD", max_pips=10))
+        self.assertTrue(is_oversized_signal_candle(fx, "EURUSD", max_pips=9))
 
     def test_usable_target_requires_4r(self):
         self.assertIsNone(usable_target("SELL", 100.0, 101.0, 97.0))

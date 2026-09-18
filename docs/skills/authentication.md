@@ -6,7 +6,7 @@ Authenticate application users independently from MT5 credentials.
 
 ## Implementation
 
-Application passwords are hashed with bcrypt in `apps/backend-python/app/auth/security.py`. JWT access tokens are created after successful registration or login and verified by `get_current_user`.
+Application passwords are hashed with bcrypt in `apps/backend-python/app/auth.py`. JWT access tokens are created after successful registration or login and verified by `get_current_user`.
 
 MT5 credentials are not part of the token. They remain encrypted in MongoDB and are decrypted server-side only when MT5 connectivity is needed.
 

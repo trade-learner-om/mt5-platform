@@ -6,10 +6,11 @@ The app is adapted from a reference SignalBridge workflow, but international MT5
 
 ## Repository Structure
 
-- `apps/backend-python` - FastAPI backend, MongoDB persistence, JWT sessions, bcrypt password hashes, Fernet-encrypted MT5 credentials, local MT5 adapter, order lifecycle, alerts, planner, and automation routes.
-- `apps/frontend-react` - Vite React frontend using TailwindCSS and the backend REST/WebSocket APIs.
-- `apps/android-app` - Native Kotlin/Jetpack Compose Android app for LAN access to the same backend APIs.
-- `docs` - Architecture notes, AI-readable project context, implementation skills, changelog, and migration plans.
+- `apps/backend-python` - FastAPI backend, MongoDB persistence, JWT sessions, bcrypt password hashes, Fernet-encrypted MT5 credentials, local MT5 adapter, order lifecycle, alerts, planner, and strategy routes (Trap Reversal, Master Break, Scheduled Break Trade).
+- `apps/frontend-react` - Vite React chartless terminal using TailwindCSS and the backend REST/WebSocket APIs.
+- `apps/android-app` - Native Kotlin/Jetpack Compose Android client (production API by default).
+- `apps/ios-app` - Native SwiftUI iOS client with parity goals vs Android.
+- `docs` - Architecture notes, AI-readable project context, implementation skills, changelog, and migration plans. Start at `docs/README.md`.
 - `scripts` - Local Windows helper scripts for starting, stopping, and diagnosing the platform.
 - `shared` - Reserved for future shared contracts or generated assets.
 
@@ -72,10 +73,9 @@ LOG_FILE=logs/backend.log
 LOG_TO_CONSOLE=false
 LOG_LEVEL=INFO
 LOG_FORMAT=text
-TRAP_HUNTER_LOG_LEVEL=DEBUG
 ```
 
-Trap Hunter activity is logged under the `app.trap_hunter` logger with structured payloads (FSM rolls, M5 bars, broker orders, run lifecycle). On Windows: `findstr trap_hunter logs\backend.log`.
+Strategy and MT5 adapter logs use the normal backend logger hierarchy. Never log MT5 passwords or decrypted credentials.
 
 ## Frontend Setup
 
@@ -86,13 +86,14 @@ copy .env.example .env
 npm run dev
 ```
 
-The frontend listens on port `5173`. When opened from another device on the same LAN, use `http://<server-lan-ip>:5173`; API calls default to `http://<server-lan-ip>:8000` unless `VITE_API_BASE_URL` is explicitly set.
+The frontend listens on port `5173`. Open `http://localhost:5173`; API/WS default to `http://localhost:8000` via `.env.development`. To point a local UI at production again, set `VITE_USE_PRODUCTION_API=true` and restart Vite. Production builds still use `.env.production`.
 
-## Android App
+## Mobile Apps
 
-The native Android app lives in `apps/android-app`. Open that folder in Android Studio, let Gradle sync, and run the `app` configuration on a device connected to the same LAN as the backend.
+- Android: `apps/android-app` (Android Studio). Default build targets `https://api.signalbridge.in` / `wss://api.signalbridge.in/ws/live`. See `docs/skills/android-app.md`.
+- iOS: `apps/ios-app` (Xcode). Same production hosts by default. See `docs/skills/ios-app.md` and `apps/ios-app/README.md`.
 
-On first launch the app asks for the primary host, such as `192.168.7.1:5173`, saves it locally, and checks it on every launch. If the saved host cannot be reached, the host setup screen is shown again. Backend API and WebSocket traffic are derived from the same hostname on port `8000`.
+LAN host setup remains available for non-fixed builds. Mobile clients may still contain stale GOLD Strategy / Trend Pilot API calls against removed backends — do not restore those routes.
 
 ## Local Platform Commands
 
@@ -123,11 +124,11 @@ The script can create missing environment files from examples, create the backen
 
 ## Documentation
 
-Start with:
+Start with `docs/README.md`, then:
 
 - `docs/context/project-context.md`
 - `docs/architecture/local-runtime.md`
-- `docs/skills/mt5-integration.md`
-- `docs/architecture/mac-runtime-plan.md`
+- Matching files under `docs/skills/`
+- `docs/architecture/mac-runtime-plan.md` (plan only; not implemented)
 
-Update `docs/changelog` for significant behavior changes.
+Update `docs/changelog` for significant behavior changes. Cursor agents also load thin wrappers from `.cursor/skills/`.

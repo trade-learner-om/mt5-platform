@@ -66,4 +66,4 @@ OnDeinit:
 - Attach the EA to every chart/symbol that must push ticks, or use one bridge process that subscribes to all required symbols.
 - Keep the backend port `8000` reachable from the MT5 machine.
 - Do not send ticks for unavailable broker symbols. If an invalid symbol is in the watchlist, the backend removes it when symbol lookup reports it unavailable.
-- The backend routes accepted ticks through the same market stream used by alerts, GOLD Strategy, Forex Strategy, M1 candles, planner runtime, and `/ws/live` snapshots.
+- The backend routes accepted ticks through the same market stream used by alerts, Trap Reversal, Master Break, Scheduled Break Trade, manual order runtime, M1 candles, planner runtime, and `/ws/live` snapshots.

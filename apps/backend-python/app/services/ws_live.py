@@ -15,6 +15,18 @@ WS_LIVE_HEARTBEAT_SECONDS = 20
 WS_LIVE_STREAM_REFRESH_SECONDS = 60
 
 
+def _loop_bound_push(push_snapshot: Callable[..., Awaitable[None]], loop: asyncio.AbstractEventLoop):
+    async def _push(db, user_id: str):
+        current = asyncio.get_running_loop()
+        if current is loop:
+            await push_snapshot(db, user_id)
+            return
+        future = asyncio.run_coroutine_threadsafe(push_snapshot(db, user_id), loop)
+        await asyncio.wrap_future(future)
+
+    return _push
+
+
 async def handle_live_socket_message(
     db,
     user_id: str,
@@ -29,7 +41,9 @@ async def handle_live_socket_message(
         from .market_data_stream import market_data_stream
 
         try:
-            await market_data_stream.refresh_live_stream(db, user_id, push_snapshot)
+            await market_data_stream._run_on_tick_loop(
+                market_data_stream.refresh_live_stream, db, user_id, push_snapshot
+            )
         except Exception:
             logger.exception("Live stream refresh failed on ready/pong | user=%s", user_id)
         return True
@@ -52,7 +66,8 @@ async def handle_live_socket_message(
         from .market_data_stream import market_data_stream
 
         symbol = str(payload.get("symbol") or "").strip().upper()
-        await market_data_stream.set_extra_symbols(
+        await market_data_stream._run_on_tick_loop(
+            market_data_stream.set_extra_symbols,
             db,
             user_id,
             [symbol] if symbol else [],
@@ -67,7 +82,8 @@ async def handle_live_socket_message(
             for symbol in (payload.get("symbols") or [])
             if str(symbol or "").strip()
         ]
-        await market_data_stream.set_extra_symbols(
+        await market_data_stream._run_on_tick_loop(
+            market_data_stream.set_extra_symbols,
             db,
             user_id,
             symbols,
@@ -85,6 +101,7 @@ async def run_live_socket_loop(
 ) -> None:
     stop = asyncio.Event()
     last_stream_refresh_at = datetime.min.replace(tzinfo=timezone.utc)
+    hop_push = _loop_bound_push(push_snapshot, asyncio.get_running_loop())
 
     async def heartbeat() -> None:
         from .market_data_stream import market_data_stream
@@ -100,7 +117,9 @@ async def run_live_socket_loop(
             try:
                 now = datetime.now(timezone.utc)
                 if (now - last_stream_refresh_at).total_seconds() >= WS_LIVE_STREAM_REFRESH_SECONDS:
-                    await market_data_stream.refresh_live_stream(db, user_id, push_snapshot)
+                    await market_data_stream._run_on_tick_loop(
+                        market_data_stream.refresh_live_stream, db, user_id, hop_push
+                    )
                     last_stream_refresh_at = now
                 await websocket.send_json({"type": "ping"})
             except Exception:
@@ -111,7 +130,7 @@ async def run_live_socket_loop(
         while not stop.is_set():
             message = await websocket.receive_text()
             try:
-                await handle_live_socket_message(db, user_id, websocket, message, push_snapshot)
+                await handle_live_socket_message(db, user_id, websocket, message, hop_push)
             except Exception:
                 logger.exception("Live websocket message handling failed | user=%s", user_id)
     finally:

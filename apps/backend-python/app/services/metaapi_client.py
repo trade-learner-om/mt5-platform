@@ -222,13 +222,22 @@ class LocalMT5Connection:
         await self.service.release_streaming_connection(self.token, self.account_id)
 
     async def _shutdown_polling(self) -> None:
-        if self._poll_task and not self._poll_task.done():
-            self._poll_task.cancel()
-            try:
-                await self._poll_task
-            except asyncio.CancelledError:
-                pass
+        task = self._poll_task
         self._poll_task = None
+        if task and not task.done():
+            try:
+                current_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                current_loop = None
+            task_loop = task.get_loop()
+            if current_loop is task_loop:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            else:
+                task_loop.call_soon_threadsafe(task.cancel)
         self._subscriptions.clear()
         self._listeners.clear()
 
@@ -265,9 +274,10 @@ class LocalMT5Connection:
     async def ensure_polling(self) -> None:
         if not self._subscriptions:
             return
-        if self._poll_task and not self._poll_task.done():
+        task = self._poll_task
+        if task and not task.done():
             return
-        restarting = self._poll_task is not None
+        restarting = task is not None
         message = "Restarting local MT5 price polling" if restarting else "Starting local MT5 price polling"
         log = logger.warning if restarting else logger.info
         log(
@@ -314,25 +324,38 @@ class LocalMT5StreamingPool:
         self._service = service
         self._connections: dict[str, LocalMT5Connection] = {}
         self._ref_counts: dict[str, int] = {}
-        self._lock = asyncio.Lock()
+        self._guard = threading.Lock()
 
     def _key(self, token: str, account_id: str) -> str:
         return self._service._session_manager._session_key(token, account_id)
 
     async def acquire(self, token: str, account_id: str) -> LocalMT5Connection:
-        async with self._lock:
-            key = self._key(token, account_id)
+        key = self._key(token, account_id)
+        with self._guard:
             connection = self._connections.get(key)
-            if connection is None:
-                connection = LocalMT5Connection(self._service, token, account_id)
-                await connection.connect()
-                self._connections[key] = connection
-            self._ref_counts[key] = self._ref_counts.get(key, 0) + 1
-            return connection
+            if connection is not None:
+                self._ref_counts[key] = self._ref_counts.get(key, 0) + 1
+                return connection
+        created = LocalMT5Connection(self._service, token, account_id)
+        await created.connect()
+        extra = None
+        with self._guard:
+            existing = self._connections.get(key)
+            if existing is not None:
+                extra = created
+                self._ref_counts[key] = self._ref_counts.get(key, 0) + 1
+                connection = existing
+            else:
+                self._connections[key] = created
+                self._ref_counts[key] = 1
+                connection = created
+        if extra is not None:
+            await extra._shutdown_polling()
+        return connection
 
     async def release(self, token: str, account_id: str) -> None:
         connection = None
-        async with self._lock:
+        with self._guard:
             key = self._key(token, account_id)
             current = self._ref_counts.get(key, 0)
             if current <= 0:

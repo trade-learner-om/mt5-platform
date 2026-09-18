@@ -1,5 +1,7 @@
 # Trend Pilot porting guide — mt5-platform → CryptoBridge
 
+> **Archived / historical.** Trend Pilot and its `/trend-pilot/*` routes were removed from this platform (see `docs/skills/automation.md`). Keep this guide only as a reference for porting the old behavior into CryptoBridge or other forks. Do not use it to revive Trend Pilot here.
+
 This document describes the **Trend Pilot** changes shipped in mt5-platform commit `264e14f` so you can apply the same behavior in **CryptoBridge**. It covers two related features:
 
 1. **Live/backtest parity** — live execution matches backtest semantics (always-in-position, 2× reversal stops, H4 roll behavior, gap recovery, funded loss cap).

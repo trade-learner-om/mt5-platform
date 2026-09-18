@@ -9,9 +9,11 @@ Native SwiftUI iOS client matching the Android app in `apps/android-app`. The ap
 - Watch, Trade, Positions, More (Strategies)
 - Live websocket state, watchlist, manual orders
 - Positions with expandable order activity timeline
-- GOLD strategy monitoring and stop actions
+- Trap Reversal start/stop/levels (live API)
 - Trade planner run/deactivate/delete
-- Local notifications for strategy status changes
+- Local notifications for order/strategy status changes
+
+Note: some screens may still reference removed `/gold-strategy/*` or `/trend-pilot/*` endpoints. Do not restore those backends; clean up mobile callers when touching strategy UI.
 
 ## Requirements
 

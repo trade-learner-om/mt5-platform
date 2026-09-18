@@ -1,12 +1,31 @@
-function defaultApiBase() {
-  return "https://api.signalbridge.in";
+function envFlagEnabled(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
 }
+
+/** Restorable production API (also used by `.env.production` builds). */
+export const PRODUCTION_API_BASE = "https://api.signalbridge.in";
+
+/** Default local backend when UI is opened on localhost / LAN. */
+export const LOCAL_API_BASE = "http://localhost:8000";
 
 const PRODUCTION_APP_HOSTS = new Set([
   "signalbridge.in",
   "www.signalbridge.in",
   "app.signalbridge.in",
 ]);
+
+function useProductionApi() {
+  // Restore production from a local UI session:
+  //   VITE_USE_PRODUCTION_API=true
+  // Production builds still load https://api.signalbridge.in from `.env.production`.
+  return envFlagEnabled(import.meta.env.VITE_USE_PRODUCTION_API);
+}
+
+function defaultApiBase() {
+  if (useProductionApi()) return PRODUCTION_API_BASE;
+  return LOCAL_API_BASE;
+}
 
 function isLocalDevHost(hostname) {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
@@ -21,24 +40,43 @@ function isPrivateLanHost(hostname) {
   );
 }
 
+function isProductionApiHost(hostname) {
+  return hostname === "api.signalbridge.in" || PRODUCTION_APP_HOSTS.has(hostname);
+}
+
+function localApiBaseForBrowser(hostname) {
+  const host = hostname || "localhost";
+  return `http://${host}:8000`;
+}
+
 function resolveBrowserBase(value) {
   const configured = (value || defaultApiBase()).replace(/\/$/, "");
   if (typeof window === "undefined") return configured;
 
   const browserHost = window.location.hostname;
   if (PRODUCTION_APP_HOSTS.has(browserHost)) {
-    return defaultApiBase();
+    return PRODUCTION_API_BASE;
   }
 
   if (isLocalDevHost(browserHost) || isPrivateLanHost(browserHost)) {
+    if (useProductionApi()) {
+      return PRODUCTION_API_BASE;
+    }
+
     try {
       const url = new URL(configured);
-      if (isLocalDevHost(url.hostname)) {
+      // Local UI must talk to the local backend unless production is explicitly opted in.
+      if (isProductionApiHost(url.hostname)) {
+        return localApiBaseForBrowser(browserHost);
+      }
+      if (isLocalDevHost(url.hostname) || isPrivateLanHost(url.hostname)) {
         url.hostname = browserHost;
+        if (!url.port) url.port = "8000";
         return url.toString().replace(/\/$/, "");
       }
-    } catch {
       return configured;
+    } catch {
+      return localApiBaseForBrowser(browserHost);
     }
   }
 
@@ -46,10 +84,10 @@ function resolveBrowserBase(value) {
     try {
       const url = new URL(configured);
       if (url.protocol === "http:") {
-        return defaultApiBase();
+        return PRODUCTION_API_BASE;
       }
     } catch {
-      return defaultApiBase();
+      return PRODUCTION_API_BASE;
     }
   }
 

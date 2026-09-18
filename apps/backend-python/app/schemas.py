@@ -593,6 +593,7 @@ class ScheduledTradeCreateIn(BaseModel):
     timeframe: str = "M5"
     risk_amount: Optional[float] = None
     target: Optional[float] = None
+    max_signal_candle_pips: Optional[float] = None
     retryable_order: bool = False
 
 
@@ -605,6 +606,7 @@ class ScheduledTradeOut(BaseModel):
     side: Optional[str] = None
     risk_amount: Optional[float] = None
     target: Optional[float] = None
+    max_signal_candle_pips: Optional[float] = None
     retryable_order: bool = False
     retry_used: bool = False
     status: Optional[str] = None

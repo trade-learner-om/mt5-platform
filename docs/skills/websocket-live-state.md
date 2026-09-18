@@ -24,6 +24,8 @@ The React frontend no longer renders a price chart. `/ws/live` is now used for t
 
 The local MT5 stream polls subscribed symbols once per second through `apps/backend-python/app/services/metaapi_client.py`. An MT5 Expert Advisor or bridge may also push ticks into `WS /ws/mt5/ticks`, but live state does not require an EA when backend polling is available.
 
+Live-stream restore, ensure, refresh, reconcile, extra-symbol subscribe, and websocket heartbeat must run on `market_data_stream`'s dedicated tick loop. Do not call those entrypoints through `run_coro_in_thread(asyncio.run(...))`: that creates a throwaway loop and binds `asyncio.Lock` / `asyncio.Task` objects that later fail on uvicorn. The streaming connection pool uses a `threading.Lock` only around dict mutations.
+
 `WS /ws/mt5/ticks` requires the per-account tick ingest secret shown in Manage Accounts and accepts either one tick:
 
 ```json

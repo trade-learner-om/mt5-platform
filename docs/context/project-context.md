@@ -27,13 +27,13 @@ Application authentication uses bcrypt password hashes and JWT access tokens wit
 
 MT5 operations are blocking desktop-terminal IPC calls, so the compatibility adapter serializes local terminal access and runs operations off the event loop. Account creation requires a terminal path detected on the machine where the backend and MT5 terminal are running, then validates that the connected terminal login/server match the account being added.
 
-Live market processing also avoids blocking the main FastAPI event loop. Authentication lookup, health-check database ping, route-facing market-data restore/refresh/reconcile/tick-ingest entrypoints, and the websocket-driven strategy/runtime hot path are offloaded to background threads where needed, while request-path and live-snapshot MongoDB access now use awaited Motor calls on the async side. The MT5 adapter uses a per-account session manager to serialize terminal access safely across those workers.
+Live market processing also avoids blocking the main FastAPI event loop. Authentication lookup, health-check database ping, and Indian-market stream work can still be offloaded to background threads, while international live-stream restore/refresh/reconcile/tick-ingest and websocket heartbeat hop onto `market_data_stream`'s dedicated tick loop. Request-path and live-snapshot MongoDB access use awaited Motor calls. The MT5 adapter uses a per-account session manager to serialize terminal access, and the streaming connection pool uses a thread lock for shared connection dicts.
 
 The trap-reversal runtime is built around a thread-safe singleton manager plus a per-symbol `DoubleTrapFSM`. H1 structural supports and resistances are indexed once at startup using `scipy.signal.find_peaks`, then filtered by a forward-pass monotonic stack so the live engine starts only with still-active levels. Live ticks are routed by symbol in `O(1)` and each FSM processes scalar prices and a tiny rolling M1 candle buffer instead of pandas dataframes.
 
 Master Break is a separate international XAUUSD/GOLD strategy: dual-side FSMs watch a master timeframe (H4/H6/H12/D1) for break levels, arm pending entries on an execution timeframe (M1/M5/M15), then manage multi-target partials and breakeven. Live routing shares the market-data tick path with trap reversal; settings and backtest results live under `/master-break/*` and `strategy_results` with `strategy_type=master_break`.
 
-Scheduled Break Trade is a user-level break tool (not Master Break): create a schedule with a price level and M1/M5/M15 timeframe on the selected international account, wait for a completed candle close past the level, arm on the next valid red/green candle, place SL (LIMIT fallback on Invalid price for the primary leg only), and optionally re-place the same SL once after stop-out under `RETRY_*` statuses on the same document. UI lives under Positions → Scheduled Trade; API under `/scheduled-trades/*`.
+Scheduled Break Trade is a user-level break tool (not Master Break): create a schedule with a price level and M1/M5/M15 timeframe on the selected international account, wait for a completed candle close past the level, arm on the next valid red/green candle, place SL (LIMIT fallback on Invalid price for the primary leg only), and optionally re-place the same SL once after stop-out under `RETRY_*` statuses on the same document. UI is a root sidebar page (**Scheduled Trade**, page id `scheduled-trade`); API under `/scheduled-trades/*`.
 
 ## Data Storage
 
@@ -64,7 +64,7 @@ Trade Planner plans default to execution-enabled when created. Turning execution
 
 The Place Order ticket includes a Candle Detector helper for international MT5 accounts. It calls `/orders/candle-detector/preview`, scans the last five completed broker candles for Hammer or Shooting Star patterns, then populates the normal ticket as an `SL` order. Hammer maps to `BUY` with entry at candle high plus one point and suggested stop loss at candle low minus one point. Shooting Star maps to `SELL` with entry at candle low minus one point and suggested stop loss at candle high plus one point. Stop loss stays editable, and final sizing/placement still flows through `/risk-preview/multi` and `/orders`.
 
-The Trading tab order ticket also supports manual trade options stored on each `orders` document in `manual_context`. `Retryable order` is shown only for `LIMIT` orders (default on). After one clean stop-loss hit on a filled LIMIT trade, the backend re-places the setup once as an `SL` order with the same entry, stop loss, quantity, and target. `Automatic trade management` is available for all order types (default on). When enabled, the manual order runtime books 50% at 4R, closes the remaining quantity at target when a target is set, and leaves the runner open if no target is defined. Runtime code lives in `apps/backend-python/app/services/manual_order_runtime.py`. All lifecycle actions are persisted in `order_events` with IST timestamps and are exposed through `GET /orders/{order_id}/events` and the Positions order activity panel.
+The Trading tab order ticket also supports manual trade options stored on each `orders` document in `manual_context`. `Retryable order` applies to `LIMIT` and `SL` orders (default on). After one clean stop-loss hit on a filled trade, the backend re-places the setup once as an `SL` order with the same entry, stop loss, quantity, and target (with LIMIT fallback on Invalid price). `Automatic trade management` is available for all order types (default on). When enabled, the manual order runtime books 50% at 4R, closes the remaining quantity at target when a target is set, and leaves the runner open if no target is defined. Conditional SL (`conditional_order` + `trigger_price`) arms as `WAITING_TRIGGER` until a live tick crosses the trigger. Runtime code lives in `apps/backend-python/app/services/manual_order_runtime.py`. All lifecycle actions are persisted in `order_events` with IST timestamps and are exposed through `GET /orders/{order_id}/events` and the Positions order activity panel.
 
 The web frontend is now a chartless execution and data terminal. Historical candle infrastructure still exists on the backend (`GET /chart/candles` plus the MongoDB candle caches) for broker-side analytics and support tooling, but the React UI no longer renders TradingView/Lightweight Charts or exposes chart timeframe selectors. The primary web shell is a Bloomberg-style terminal layout: collapsible sidebar, top server/equity bar, and a dense three-column dashboard for watchlist, FSM engines, and live positions.
 
@@ -85,6 +85,19 @@ Backend validation and MT5 adapter logs must redact passwords, encrypted credent
 ## Local Operations
 
 Use `scripts/mt5-platform.bat` to manage both local servers. The command supports `start`, `stop`, `restart`, and `status`, and is intended to be available on the user's PATH as `mt5-platform`. During startup it can create local `.env` files, install dependencies, and generate development JWT/Fernet secrets when placeholders are still present.
+
+## Documentation maintenance
+
+- Index and skill map: `docs/README.md`.
+- Read `docs/context/project-context.md` plus matching `docs/skills/*.md` before coding (`AGENTS.md`).
+- Update changelog under `docs/changelog/` after significant behavior changes.
+- Cursor wrappers live in `.cursor/skills/`; keep them thin and point at `docs/skills`.
+
+## Active strategy runtimes
+
+- Trap Reversal — `docs/skills/trap-reversal.md`
+- Master Break — `docs/skills/master-break.md`
+- Scheduled Break Trade — `docs/skills/scheduled-break-trade.md`
 
 ## Contributor Preferences
 

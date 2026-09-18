@@ -364,13 +364,17 @@ async def _restore_market_data_runtime(db):
         logger.exception("Master Break runtime restore failed")
 
     loop = asyncio.get_running_loop()
-    await run_coro_in_thread(market_data_stream.restore_running_streams, db, _threadsafe_push_snapshot(loop))
+    await market_data_stream._run_on_tick_loop(
+        market_data_stream.restore_running_streams,
+        db,
+        _threadsafe_push_snapshot(loop),
+    )
 
 
 async def _ensure_market_data_stream(db, user_id: str, *, force: bool = False):
     loop = asyncio.get_running_loop()
     if force:
-        await run_coro_in_thread(
+        await market_data_stream._run_on_tick_loop(
             market_data_stream.refresh_live_stream,
             db,
             user_id,
@@ -378,11 +382,16 @@ async def _ensure_market_data_stream(db, user_id: str, *, force: bool = False):
             force=True,
         )
         return
-    await run_coro_in_thread(market_data_stream.ensure_user_stream, db, user_id, _threadsafe_push_snapshot(loop))
+    await market_data_stream._run_on_tick_loop(
+        market_data_stream.ensure_user_stream,
+        db,
+        user_id,
+        _threadsafe_push_snapshot(loop),
+    )
 
 
 async def _reconcile_market_data_orders(db, user_id: str, *, force: bool = False, include_all_accounts: bool = False):
-    await run_coro_in_thread(
+    await market_data_stream._run_on_tick_loop(
         market_data_stream.reconcile_active_orders,
         db,
         user_id,
@@ -393,7 +402,7 @@ async def _reconcile_market_data_orders(db, user_id: str, *, force: bool = False
 
 async def _handle_market_data_ticks(db, ingest_account_db_id: str, ticks: list[dict]):
     loop = asyncio.get_running_loop()
-    return await run_coro_in_thread(
+    return await market_data_stream._run_on_tick_loop(
         market_data_stream.handle_pushed_ticks,
         db,
         ingest_account_db_id,
@@ -423,7 +432,9 @@ async def _refresh_user_streams(user_id: str, include_indian: bool = True, force
     try:
         loop = asyncio.get_running_loop()
         push_snapshot = _threadsafe_push_snapshot(loop)
-        await run_coro_in_thread(market_data_stream.refresh_live_stream, db, user_id, push_snapshot, force=force)
+        await market_data_stream._run_on_tick_loop(
+            market_data_stream.refresh_live_stream, db, user_id, push_snapshot, force=force
+        )
         if include_indian:
             await run_coro_in_thread(indian_market_stream_manager.ensure_user_stream, db, user_id, push_snapshot)
         await live_state_hub.push_snapshot(db, user_id)
@@ -4449,11 +4460,12 @@ async def create_scheduled_trade(data: ScheduledTradeCreateIn, user=Depends(get_
             mid_price=float(mid),
             point_size=point,
             price_digits=digits,
+            max_signal_candle_pips=data.max_signal_candle_pips,
             seed_candles=seed,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    await market_data_stream.refresh_live_stream(db, str(user["_id"]), live_state_hub.push_snapshot, force=True)
+    await _ensure_market_data_stream(db, str(user["_id"]), force=True)
     await live_state_hub.push_snapshot(db, str(user["_id"]))
     return ScheduledTradeOut(**created)
 

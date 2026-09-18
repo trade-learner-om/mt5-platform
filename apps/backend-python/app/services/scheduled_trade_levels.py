@@ -92,9 +92,10 @@ def scheduled_pip_size(symbol: str) -> float:
 
 
 def max_signal_candle_pips(symbol: str) -> float:
+    """Default max signal-candle range in pips (FX 10, XAU/GOLD 100)."""
     if is_gold_symbol(symbol):
         return 100.0
-    return 12.0
+    return 10.0
 
 
 def candle_range_pips(candle: CandleLike, pip_size: float) -> float:
@@ -106,9 +107,30 @@ def candle_range_pips(candle: CandleLike, pip_size: float) -> float:
     return abs(high - low) / pip
 
 
-def is_oversized_signal_candle(candle: CandleLike, symbol: str, pip_size: Optional[float] = None) -> bool:
+def is_oversized_signal_candle(
+    candle: CandleLike,
+    symbol: str,
+    pip_size: Optional[float] = None,
+    max_pips: Optional[float] = None,
+) -> bool:
     size = scheduled_pip_size(symbol) if pip_size is None else as_float(pip_size)
-    return candle_range_pips(candle, size) > max_signal_candle_pips(symbol) + PRICE_EPSILON
+    limit = as_float(max_pips) if max_pips is not None else max_signal_candle_pips(symbol)
+    if limit <= 0:
+        return False
+    return candle_range_pips(candle, size) > limit + PRICE_EPSILON
+
+
+def normalize_max_signal_candle_pips(value: Any, symbol: str) -> float:
+    """Resolve user override or symbol default; must be positive."""
+    if value is None or value == "":
+        return max_signal_candle_pips(symbol)
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("max_signal_candle_pips must be a number") from exc
+    if parsed <= 0:
+        raise ValueError("max_signal_candle_pips must be positive")
+    return parsed
 
 
 def resolve_side_from_level(level: float, mid_price: float) -> str:

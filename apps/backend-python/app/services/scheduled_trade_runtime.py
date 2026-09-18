@@ -8,6 +8,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+from weakref import WeakKeyDictionary
 
 from bson import ObjectId
 
@@ -34,6 +35,7 @@ from .scheduled_trade_levels import (
     is_oversized_signal_candle,
     is_red,
     level_broken_on_close,
+    normalize_max_signal_candle_pips,
     normalize_scheduled_timeframe,
     resolve_side_from_level,
     scheduled_pip_size,
@@ -96,6 +98,7 @@ def _serialize_schedule(doc: dict) -> dict:
         "side": doc.get("side"),
         "risk_amount": doc.get("risk_amount"),
         "target": doc.get("target"),
+        "max_signal_candle_pips": doc.get("max_signal_candle_pips"),
         "retryable_order": bool(doc.get("retryable_order")),
         "retry_used": bool(doc.get("retry_used")),
         "status": doc.get("status"),
@@ -180,7 +183,7 @@ class ScheduledTradeManager:
 
     def __init__(self) -> None:
         self._runtimes: dict[str, ScheduleRuntime] = {}
-        self._locks: dict[str, asyncio.Lock] = {}
+        self._locks: WeakKeyDictionary[asyncio.AbstractEventLoop, dict[str, asyncio.Lock]] = WeakKeyDictionary()
         self._symbol_index: dict[str, set[str]] = {}
 
     @classmethod
@@ -228,11 +231,13 @@ class ScheduledTradeManager:
         mid_price: float,
         point_size: float,
         price_digits: int,
+        max_signal_candle_pips: Optional[float] = None,
         seed_candles: Optional[list[dict]] = None,
     ) -> dict:
         tf = normalize_scheduled_timeframe(timeframe)
         side = resolve_side_from_level(level, mid_price)
         pip_size = scheduled_pip_size(broker_symbol)
+        max_candle_pips = normalize_max_signal_candle_pips(max_signal_candle_pips, broker_symbol)
         now = _utc_now()
         doc = {
             "user_id": user["_id"],
@@ -244,6 +249,7 @@ class ScheduledTradeManager:
             "side": side,
             "risk_amount": float(risk_amount),
             "target": float(target) if target is not None else None,
+            "max_signal_candle_pips": float(max_candle_pips),
             "retryable_order": bool(retryable_order),
             "retry_used": False,
             "status": "INITIATED",
@@ -279,7 +285,13 @@ class ScheduledTradeManager:
             "SCHEDULE_CREATED",
             "INITIATED",
             f"{broker_symbol} {side} schedule created at level {level} on {tf}",
-            {"level": level, "side": side, "timeframe": tf, "mid_price": mid_price},
+            {
+                "level": level,
+                "side": side,
+                "timeframe": tf,
+                "mid_price": mid_price,
+                "max_signal_candle_pips": max_candle_pips,
+            },
         )
         return _serialize_schedule(doc)
 
@@ -420,10 +432,15 @@ class ScheduledTradeManager:
     # --- internals ---
 
     def _lock_for(self, schedule_id: str) -> asyncio.Lock:
-        lock = self._locks.get(schedule_id)
+        loop = asyncio.get_running_loop()
+        loop_locks = self._locks.get(loop)
+        if loop_locks is None:
+            loop_locks = {}
+            self._locks[loop] = loop_locks
+        lock = loop_locks.get(schedule_id)
         if lock is None:
             lock = asyncio.Lock()
-            self._locks[schedule_id] = lock
+            loop_locks[schedule_id] = lock
         return lock
 
     def _runtime_key(self, doc: dict) -> str:
@@ -474,7 +491,10 @@ class ScheduledTradeManager:
                     bucket.discard(key)
                     if not bucket:
                         self._symbol_index.pop(symbol, None)
-            self._locks.pop(str(runtime.schedule_id) if runtime else schedule_id, None)
+            lock_id = str(runtime.schedule_id) if runtime else schedule_id
+            for loop_locks in list(self._locks.values()):
+                loop_locks.pop(lock_id, None)
+                loop_locks.pop(schedule_id, None)
 
     def _get_runtime(self, doc: dict) -> ScheduleRuntime:
         key = self._runtime_key(doc)
@@ -561,14 +581,22 @@ class ScheduledTradeManager:
             signal_ok = is_red(candle) if side == "SELL" else is_green(candle)
             if not signal_ok:
                 return
-            if is_oversized_signal_candle(candle, symbol, pip_size):
+            if is_oversized_signal_candle(
+                candle,
+                symbol,
+                pip_size,
+                max_pips=doc.get("max_signal_candle_pips"),
+            ):
                 await self._append_event(
                     db,
                     doc,
                     "SIGNAL_CANDLE_SKIPPED",
                     "ARMED",
                     "Signal candle oversized; waiting for next valid candle",
-                    {"candle": candle},
+                    {
+                        "candle": candle,
+                        "max_signal_candle_pips": doc.get("max_signal_candle_pips"),
+                    },
                 )
                 return
             await self._place_primary(db, account, doc, candle)

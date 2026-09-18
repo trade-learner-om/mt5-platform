@@ -419,7 +419,7 @@ Before calling the Mac runtime production-ready:
 - Risk preview quantity uses bridge-provided tick value and broker volume step.
 - Trade Planner preview works.
 - Trade Planner auto-execution works.
-- Automation live mode works.
+- Trap Reversal / Master Break / Scheduled Break Trade live modes work.
 - H1 analysis candles load.
 - Logs redact secrets.
 - Bridge disconnect shows clear UI/API error.

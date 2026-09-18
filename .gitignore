@@ -1,0 +1,75 @@
+# Never commit credentials, passwords, or API keys!
+.env
+.env.local
+.env.production
+*.pem
+*.key
+
+# ==========================================
+# 📦 Dependencies & Package Managers
+# ==========================================
+# Third-party packages should be re-installed using package managers, not tracked.
+node_modules/
+jspm_packages/
+web_modules/
+
+# Python dependencies
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+
+# Java/Composer dependencies
+.gradle/
+vendor/
+node_modules/
+**/node_modules/
+# ==========================================
+# 🏗️ Build Outputs & Compiled Code
+# ==========================================
+# Ignore folders where built/compiled applications are generated.
+dist/
+build/
+out/
+target/
+*.o
+*.exe
+*.dll
+*.so
+
+# ==========================================
+# 📝 Logs & Runtime Reports
+# ==========================================
+# Ignore system tracking logs, debug footprints, and crash reports.
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+logs/
+hs_err_pid*
+
+# ==========================================
+# 💻 OS-Specific Metadata Junk
+# ==========================================
+# Hidden system files created by your operating system.
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ==========================================
+# 🛠️ Editor & IDE Workspaces
+# ==========================================
+# Specific config folders used by common development editors.
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp

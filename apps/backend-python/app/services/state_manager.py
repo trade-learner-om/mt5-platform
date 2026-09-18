@@ -178,6 +178,7 @@ class LiveStateHub:
                     "side": item.get("side"),
                     "risk_amount": item.get("risk_amount"),
                     "target": item.get("target"),
+                    "max_signal_candle_pips": item.get("max_signal_candle_pips"),
                     "retryable_order": bool(item.get("retryable_order")),
                     "retry_used": bool(item.get("retry_used")),
                     "status": item.get("status"),

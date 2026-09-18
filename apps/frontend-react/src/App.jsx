@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, Crosshair, List, Settings, Workflow } from "lucide-react";
+import { Activity, AlarmClock, Crosshair, List, Settings, Workflow } from "lucide-react";
 import { api, openLiveSocket, liveSnapshotHasFreshPrices, pingBackendHealth, WS_LIVE_STALE_MS } from "./api";
 import AppShell from "./components/layout/AppShell";
 import ManageAccountModal from "./components/ManageAccountModal";
@@ -2868,7 +2868,6 @@ function PendingOrdersPositionsPanel({
   accounts = [],
   activeAccountId = "",
   livePrices = {},
-  liveScheduledTrades = [],
   onNotify,
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -2903,7 +2902,6 @@ function PendingOrdersPositionsPanel({
             accounts={accounts}
             activeAccountId={activeAccountId}
             livePrices={livePrices}
-            liveScheduledTrades={liveScheduledTrades}
             onNotify={onNotify}
           />
         </div>
@@ -3042,7 +3040,7 @@ function OrderActivityTimeline({ orderId, token }) {
   );
 }
 
-function Tracker({ rows, onOpenClose, onEditOrder, onFullClose, onCancelOrder, actionLoadingId, token, accounts = [], activeAccountId = "", livePrices = {}, liveScheduledTrades = [], onNotify }) {
+function Tracker({ rows, onOpenClose, onEditOrder, onFullClose, onCancelOrder, actionLoadingId, token, accounts = [], activeAccountId = "", livePrices = {}, onNotify }) {
   const [tab, setTab] = useState("positions");
   const [historyPage, setHistoryPage] = useState(1);
   const [historyState, setHistoryState] = useState({ records: [], total: 0, page: 1, page_size: 10 });
@@ -4152,7 +4150,7 @@ function Tracker({ rows, onOpenClose, onEditOrder, onFullClose, onCancelOrder, a
     <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">Pending Orders & Positions</h3>
-        <div className="grid grid-cols-4 gap-2 rounded-lg bg-slate-100 p-1 dark:bg-slate-950">
+        <div className="grid grid-cols-3 gap-2 rounded-lg bg-slate-100 p-1 dark:bg-slate-950">
           <button
             onClick={() => setTab("positions")}
             className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${tab === "positions" ? "bg-slate-900 text-white shadow dark:bg-slate-100 dark:text-slate-950" : "text-slate-500 dark:text-slate-400"}`}
@@ -4164,12 +4162,6 @@ function Tracker({ rows, onOpenClose, onEditOrder, onFullClose, onCancelOrder, a
             className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${tab === "orders" ? "bg-slate-900 text-white shadow dark:bg-slate-100 dark:text-slate-950" : "text-slate-500 dark:text-slate-400"}`}
           >
             Orders
-          </button>
-          <button
-            onClick={() => setTab("scheduled")}
-            className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${tab === "scheduled" ? "bg-slate-900 text-white shadow dark:bg-slate-100 dark:text-slate-950" : "text-slate-500 dark:text-slate-400"}`}
-          >
-            Scheduled Trade
           </button>
           <button
             onClick={() => setTab("history")}
@@ -4189,15 +4181,6 @@ function Tracker({ rows, onOpenClose, onEditOrder, onFullClose, onCancelOrder, a
         <div className="space-y-4">
           {renderOrdersSection()}
         </div>
-      ) : tab === "scheduled" ? (
-        <ScheduledTradePanel
-          token={token}
-          accounts={accounts}
-          activeAccountId={activeAccountId}
-          livePrices={livePrices}
-          liveScheduledTrades={liveScheduledTrades}
-          onNotify={onNotify}
-        />
       ) : (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950">
@@ -6778,6 +6761,7 @@ export default function App() {
       { id: "trading", label: "Watchlist", shortLabel: "Watch", icon: List },
       { id: "trap-reversal", label: "FSM Engines", shortLabel: "FSM", icon: Workflow },
       { id: "master-break", label: "Master Break", shortLabel: "MB", icon: Crosshair },
+      { id: "scheduled-trade", label: "Scheduled Trade", shortLabel: "Sched", icon: AlarmClock },
       { id: "positions", label: "Positions", shortLabel: "Pos", icon: Activity },
       { id: "settings", label: "Settings", shortLabel: "Set", icon: Settings },
     ]),
@@ -7235,6 +7219,7 @@ export default function App() {
         "positions",
         "trap-reversal",
         "master-break",
+        "scheduled-trade",
         "settings",
         "trade-planner",
         ...(current.is_admin ? ["admin"] : []),
@@ -7556,7 +7541,6 @@ export default function App() {
                 accounts={internationalAccounts}
                 activeAccountId={me?.selected_account_id || ""}
                 livePrices={livePrices}
-                liveScheduledTrades={liveScheduledTrades}
                 onNotify={(payload) => notify(payload?.type || "info", payload?.message || "")}
               />
             </main>
@@ -7651,6 +7635,38 @@ export default function App() {
               <MasterBreakDashboard
                 token={token}
                 selectedAccountExists={selectedAccountExists}
+                onNotify={notify}
+              />
+            </main>
+          )
+        ) : currentPage === "scheduled-trade" ? (
+          isIndianMarket ? (
+            <main className="min-h-0 flex-1 overflow-auto">
+              <section className="terminal-panel">
+                <p className="text-sm font-semibold uppercase tracking-[0.24em] text-indigo-600">Scheduled Trade</p>
+                <h2 className="mt-2 text-2xl font-bold text-[color:var(--text-strong)]">International MT5 only</h2>
+                <p className="mt-3 max-w-2xl text-sm text-[color:var(--text-muted)]">
+                  Scheduled Break Trade watches an M1/M5/M15 close past your level, then arms on the next valid red/green candle before placing an SL.
+                </p>
+              </section>
+            </main>
+          ) : (
+            <main className="min-h-0 flex-1 overflow-auto p-4">
+              <section className="mb-4">
+                <p className="text-sm font-semibold uppercase tracking-[0.24em] text-indigo-600">Scheduled Trade</p>
+                <h2 className="mt-2 text-2xl font-bold text-[color:var(--text-strong)]">Break level → signal candle → SL</h2>
+                <p className="mt-2 max-w-3xl text-sm text-[color:var(--text-muted)]">
+                  Set a price and timeframe on the selected international account. Level above live mid is short; below is long.
+                  After a close past the level, the next valid red (short) or green (long) candle places the stop order.
+                </p>
+              </section>
+              <ScheduledTradePanel
+                token={token}
+                accounts={internationalAccounts}
+                activeAccountId={me?.selected_account_id || ""}
+                livePrices={livePrices}
+                liveScheduledTrades={liveScheduledTrades}
+                subscribeLiveSymbol={subscribeLiveSymbol}
                 onNotify={notify}
               />
             </main>

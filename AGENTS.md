@@ -7,8 +7,9 @@ This repository is designed to be maintained by human and AI coding agents.
 Before coding:
 
 1. Read `docs/context/project-context.md`.
-2. Read any relevant files in `docs/skills`.
-3. Preserve the architecture described in the context documentation.
+2. Read `docs/README.md` and any relevant files in `docs/skills`.
+3. Prefer matching `.cursor/skills/*/SKILL.md` wrappers for domain discovery.
+4. Preserve the architecture described in the context documentation.
 
 ## Change Rules
 
@@ -21,6 +22,7 @@ Before coding:
 - Keep backend routes thin and put business logic in services.
 - Keep frontend API access in `src/services` and server state in React Query.
 - Add focused tests when behavior becomes risky or shared.
+- When docs drift, update `docs/skills` (and thin Cursor wrappers) rather than only leaving notes in chat.
 
 ## Local Runtime
 

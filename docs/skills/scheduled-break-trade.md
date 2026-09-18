@@ -28,9 +28,11 @@ v1 retry places the **identical SL immediately** after stop-out (no second candl
 | Primary | SL first via `place_pending_order_with_limit_fallback` | Fall back to LIMIT at same entry/SL/qty/target |
 | Retry | SL only via `place_pending_order` | No LIMIT fallback; surface error on schedule |
 
+Signal candles larger than `max_signal_candle_pips` are skipped (`SIGNAL_CANDLE_SKIPPED`) until a valid candle appears. Defaults: **10** FX pips, **100** XAU/GOLD. Create payload / schedule field: `max_signal_candle_pips`.
+
 ## UI
 
-Positions → **Scheduled Trade** tab (`ScheduledTradePanel`): create form (Retryable order default **off**) + lifecycle list.
+Root sidebar → **Scheduled Trade** (`ScheduledTradePanel`): create form (Retryable order default **off**) + lifecycle list. Page id: `scheduled-trade`.
 
 ## Implementation
 

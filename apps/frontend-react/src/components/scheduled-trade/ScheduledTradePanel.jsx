@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api } from "../api";
+import { api } from "../../api";
 
 const TIMEFRAMES = ["M1", "M5", "M15"];
 
@@ -11,6 +11,15 @@ const CANCELLABLE = new Set([
   "RETRY_ARMED",
   "RETRY_ORDER_PLACED",
 ]);
+
+function isGoldSymbol(symbol) {
+  const letters = String(symbol || "").toUpperCase().replace(/[^A-Z]/g, "");
+  return letters.includes("XAU") || letters.includes("GOLD");
+}
+
+function defaultMaxSignalCandlePips(symbol) {
+  return isGoldSymbol(symbol) ? 100 : 10;
+}
 
 function midFromTick(tick) {
   if (!tick) return null;
@@ -24,6 +33,18 @@ function midFromTick(tick) {
   if (Number.isFinite(bid) && bid > 0) return bid;
   if (Number.isFinite(ask) && ask > 0) return ask;
   return null;
+}
+
+function ltpForSymbol(symbol, livePrices = {}) {
+  const key = String(symbol || "").trim().toUpperCase();
+  if (!key) return null;
+  const direct = livePrices[key] || livePrices[symbol];
+  if (direct) return midFromTick(direct);
+  const matchKey = Object.keys(livePrices || {}).find((candidate) => {
+    const upper = candidate.toUpperCase();
+    return upper === key || upper.includes(key) || key.includes(upper);
+  });
+  return matchKey ? midFromTick(livePrices[matchKey]) : null;
 }
 
 function deriveSide(level, mid) {
@@ -61,6 +82,7 @@ export default function ScheduledTradePanel({
   activeAccountId = "",
   livePrices = {},
   liveScheduledTrades = null,
+  subscribeLiveSymbol,
   onNotify,
 }) {
   const activeAccount = useMemo(
@@ -74,8 +96,10 @@ export default function ScheduledTradePanel({
     timeframe: "M5",
     risk_amount: "",
     target: "",
+    max_signal_candle_pips: "100",
     retryable_order: false,
   });
+  const [maxPipsTouched, setMaxPipsTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [cancellingId, setCancellingId] = useState("");
   const [error, setError] = useState("");
@@ -90,6 +114,14 @@ export default function ScheduledTradePanel({
       risk_amount: current.risk_amount === "" ? String(risk) : current.risk_amount,
     }));
   }, [activeAccount?.id, activeAccount?.risk_amount]);
+
+  useEffect(() => {
+    if (maxPipsTouched) return;
+    setForm((current) => ({
+      ...current,
+      max_signal_candle_pips: String(defaultMaxSignalCandlePips(current.symbol)),
+    }));
+  }, [form.symbol, maxPipsTouched]);
 
   useEffect(() => {
     if (Array.isArray(liveScheduledTrades)) {
@@ -117,16 +149,31 @@ export default function ScheduledTradePanel({
     };
   }, [token, liveScheduledTrades]);
 
-  const liveMid = useMemo(() => {
-    const symbol = String(form.symbol || "").trim().toUpperCase();
-    if (!symbol) return null;
-    const direct = livePrices[symbol];
-    if (direct) return midFromTick(direct);
-    const matchKey = Object.keys(livePrices || {}).find((key) => key.toUpperCase().includes(symbol) || symbol.includes(key.toUpperCase()));
-    return matchKey ? midFromTick(livePrices[matchKey]) : null;
-  }, [form.symbol, livePrices]);
+  useEffect(() => {
+    if (!subscribeLiveSymbol) return undefined;
+    const symbols = [];
+    const formSymbol = String(form.symbol || "").trim().toUpperCase();
+    if (formSymbol) symbols.push(formSymbol);
+    for (const row of schedules) {
+      const symbol = String(row?.symbol || "").trim().toUpperCase();
+      if (symbol && !symbols.includes(symbol)) symbols.push(symbol);
+    }
+    if (symbols.length === 0) {
+      subscribeLiveSymbol("", "scheduled-trade");
+      return () => subscribeLiveSymbol("", "scheduled-trade");
+    }
+    symbols.forEach((symbol, index) => {
+      subscribeLiveSymbol(symbol, `scheduled-trade-${index}`);
+    });
+    return () => {
+      symbols.forEach((_, index) => subscribeLiveSymbol("", `scheduled-trade-${index}`));
+    };
+  }, [form.symbol, schedules, subscribeLiveSymbol]);
+
+  const liveMid = useMemo(() => ltpForSymbol(form.symbol, livePrices), [form.symbol, livePrices]);
 
   const derivedSide = deriveSide(form.level, liveMid);
+  const defaultMaxPips = defaultMaxSignalCandlePips(form.symbol);
 
   const onSubmit = async (event) => {
     event.preventDefault();
@@ -137,6 +184,7 @@ export default function ScheduledTradePanel({
     }
     const level = Number(form.level);
     const risk = Number(form.risk_amount);
+    const maxPips = Number(form.max_signal_candle_pips);
     if (!String(form.symbol || "").trim()) {
       setError("Symbol is required");
       return;
@@ -147,6 +195,10 @@ export default function ScheduledTradePanel({
     }
     if (!Number.isFinite(risk) || risk <= 0) {
       setError("Risk amount must be positive");
+      return;
+    }
+    if (!Number.isFinite(maxPips) || maxPips <= 0) {
+      setError("Max signal candle pips must be positive");
       return;
     }
     if (liveMid != null && Math.abs(level - liveMid) < 1e-12) {
@@ -160,6 +212,7 @@ export default function ScheduledTradePanel({
         level,
         timeframe: form.timeframe,
         risk_amount: risk,
+        max_signal_candle_pips: maxPips,
         retryable_order: Boolean(form.retryable_order),
       };
       if (form.target !== "" && form.target != null) {
@@ -167,10 +220,12 @@ export default function ScheduledTradePanel({
       }
       const created = await api("/scheduled-trades", "POST", payload, token);
       setSchedules((current) => [created, ...(current || []).filter((row) => row.id !== created.id)]);
+      setMaxPipsTouched(false);
       setForm((current) => ({
         ...current,
         level: "",
         target: "",
+        max_signal_candle_pips: String(defaultMaxSignalCandlePips(current.symbol)),
         retryable_order: false,
       }));
       onNotify?.({ type: "success", message: `Scheduled ${created.side} ${created.symbol} on ${created.timeframe}` });
@@ -220,7 +275,10 @@ export default function ScheduledTradePanel({
             Symbol
             <input
               value={form.symbol}
-              onChange={(event) => setForm((current) => ({ ...current, symbol: event.target.value.toUpperCase() }))}
+              onChange={(event) => {
+                setMaxPipsTouched(false);
+                setForm((current) => ({ ...current, symbol: event.target.value.toUpperCase() }));
+              }}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             />
           </label>
@@ -262,6 +320,21 @@ export default function ScheduledTradePanel({
               inputMode="decimal"
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             />
+          </label>
+          <label className="text-xs font-semibold text-slate-500">
+            Max signal candle (pips)
+            <input
+              value={form.max_signal_candle_pips}
+              onChange={(event) => {
+                setMaxPipsTouched(true);
+                setForm((current) => ({ ...current, max_signal_candle_pips: event.target.value }));
+              }}
+              inputMode="decimal"
+              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-indigo-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            />
+            <span className="mt-1 block font-normal text-[11px] text-slate-500 dark:text-slate-400">
+              Skip signal candles wider than this (default {defaultMaxPips} for {isGoldSymbol(form.symbol) ? "XAU/GOLD" : "FX"}).
+            </span>
           </label>
           <label className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
             <input
@@ -310,16 +383,20 @@ export default function ScheduledTradePanel({
                 <tr>
                   <th className="px-3 py-2">Status</th>
                   <th className="px-3 py-2">Symbol</th>
+                  <th className="px-3 py-2">LTP</th>
                   <th className="px-3 py-2">Side</th>
                   <th className="px-3 py-2">TF</th>
                   <th className="px-3 py-2">Level</th>
+                  <th className="px-3 py-2">Max pips</th>
                   <th className="px-3 py-2">Entry / SL</th>
                   <th className="px-3 py-2">Notes</th>
                   <th className="px-3 py-2 text-right">Action</th>
                 </tr>
               </thead>
               <tbody>
-                {schedules.map((row) => (
+                {schedules.map((row) => {
+                  const ltp = ltpForSymbol(row.symbol, livePrices);
+                  return (
                   <tr key={row.id} className="border-t border-slate-100 dark:border-slate-800">
                     <td className="px-3 py-2">
                       <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${statusTone(row.status)}`}>
@@ -327,9 +404,13 @@ export default function ScheduledTradePanel({
                       </span>
                     </td>
                     <td className="px-3 py-2 font-semibold">{row.symbol}</td>
+                    <td className="px-3 py-2 font-semibold tabular-nums text-slate-800 dark:text-slate-100">
+                      {ltp != null ? formatPrice(ltp) : "—"}
+                    </td>
                     <td className={`px-3 py-2 font-semibold ${row.side === "SELL" ? "text-rose-600" : "text-emerald-600"}`}>{row.side}</td>
                     <td className="px-3 py-2">{row.timeframe}</td>
                     <td className="px-3 py-2">{formatPrice(row.level)}</td>
+                    <td className="px-3 py-2">{row.max_signal_candle_pips ?? "—"}</td>
                     <td className="px-3 py-2">
                       {row.entry != null ? `${formatPrice(row.entry)} / ${formatPrice(row.stop_loss)}` : "—"}
                     </td>
@@ -357,7 +438,8 @@ export default function ScheduledTradePanel({
                       )}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
