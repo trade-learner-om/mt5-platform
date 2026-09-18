@@ -3,8 +3,8 @@ function envFlagEnabled(value) {
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
 }
 
-/** Restorable production API (also used by `.env.production` builds). */
-export const PRODUCTION_API_BASE = "https://api.signalbridge.in";
+/** Hosted / production API (also used by `.env.production` builds). */
+export const PRODUCTION_API_BASE = "http://ec2-13-201-137-73.ap-south-1.compute.amazonaws.com:8000";
 
 /** Default local backend when UI is opened on localhost / LAN. */
 export const LOCAL_API_BASE = "http://localhost:8000";
@@ -13,12 +13,13 @@ const PRODUCTION_APP_HOSTS = new Set([
   "signalbridge.in",
   "www.signalbridge.in",
   "app.signalbridge.in",
+  "main.d3inecn5vye1xf.amplifyapp.com",
 ]);
 
 function useProductionApi() {
-  // Restore production from a local UI session:
+  // Restore hosted API from a local UI session:
   //   VITE_USE_PRODUCTION_API=true
-  // Production builds still load https://api.signalbridge.in from `.env.production`.
+  // Production builds still load EC2 from `.env.production`.
   return envFlagEnabled(import.meta.env.VITE_USE_PRODUCTION_API);
 }
 
@@ -40,8 +41,16 @@ function isPrivateLanHost(hostname) {
   );
 }
 
-function isProductionApiHost(hostname) {
-  return hostname === "api.signalbridge.in" || PRODUCTION_APP_HOSTS.has(hostname);
+function isAmplifyAppHost(hostname) {
+  return Boolean(hostname) && String(hostname).toLowerCase().endsWith(".amplifyapp.com");
+}
+
+function isEc2ApiHost(hostname) {
+  const host = String(hostname || "").toLowerCase();
+  return (
+    host === "ec2-13-201-137-73.ap-south-1.compute.amazonaws.com" ||
+    host === "13.201.137.73"
+  );
 }
 
 function localApiBaseForBrowser(hostname) {
@@ -54,7 +63,7 @@ function resolveBrowserBase(value) {
   if (typeof window === "undefined") return configured;
 
   const browserHost = window.location.hostname;
-  if (PRODUCTION_APP_HOSTS.has(browserHost)) {
+  if (PRODUCTION_APP_HOSTS.has(browserHost) || isAmplifyAppHost(browserHost)) {
     return PRODUCTION_API_BASE;
   }
 
@@ -66,7 +75,12 @@ function resolveBrowserBase(value) {
     try {
       const url = new URL(configured);
       // Local UI must talk to the local backend unless production is explicitly opted in.
-      if (isProductionApiHost(url.hostname)) {
+      if (
+        url.hostname === "api.signalbridge.in" ||
+        isEc2ApiHost(url.hostname) ||
+        isAmplifyAppHost(url.hostname) ||
+        PRODUCTION_APP_HOSTS.has(url.hostname)
+      ) {
         return localApiBaseForBrowser(browserHost);
       }
       if (isLocalDevHost(url.hostname) || isPrivateLanHost(url.hostname)) {
@@ -80,9 +94,14 @@ function resolveBrowserBase(value) {
     }
   }
 
+  // Hosted HTTPS UI (e.g. Amplify): keep configured HTTP EC2 base instead of
+  // rewriting to a different host. Browsers may still block mixed content until TLS.
   if (window.location.protocol === "https:") {
     try {
       const url = new URL(configured);
+      if (url.protocol === "http:" && isEc2ApiHost(url.hostname)) {
+        return configured;
+      }
       if (url.protocol === "http:") {
         return PRODUCTION_API_BASE;
       }
