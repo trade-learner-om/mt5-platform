@@ -121,7 +121,7 @@ export default function TerminalDashboard({
   };
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,8fr)] xl:grid-rows-[minmax(0,1fr)_auto]">
+    <div className="grid h-full min-h-0 w-full min-w-0 flex-1 grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,8fr)] xl:grid-rows-[minmax(0,1fr)_auto]">
       <div className="min-h-0 xl:row-span-2">
         <LiveWatchlist
           rows={watchlistRows}
