@@ -76,4 +76,25 @@ class Settings(BaseModel):
     ).strip()
 
 
+# Always keep hosted Vite/Amplify origins even when .env overrides CORS_ORIGINS with an older list.
+_REQUIRED_CORS_ORIGINS = (
+    "https://main.d3inecn5vye1xf.amplifyapp.com",
+    "http://ec2-13-201-137-73.ap-south-1.compute.amazonaws.com:5173",
+    "http://13.201.137.73:5173",
+)
+_REQUIRED_CORS_REGEX_PARTS = (
+    r"https://([\w-]+)\.amplifyapp\.com",
+    r"http://ec2-\d+-\d+-\d+-\d+\.ap-south-1\.compute\.amazonaws\.com:5173",
+    r"http://13\.201\.137\.73:5173",
+)
+
+
 settings = Settings()
+for _origin in _REQUIRED_CORS_ORIGINS:
+    if _origin not in settings.cors_origins:
+        settings.cors_origins.append(_origin)
+_regex = settings.cors_origin_regex or ""
+for _part in _REQUIRED_CORS_REGEX_PARTS:
+    if _part not in _regex:
+        _regex = f"{_regex}|{_part}" if _regex else _part
+settings.cors_origin_regex = _regex
