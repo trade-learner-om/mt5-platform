@@ -65,4 +65,6 @@ curl http://ec2-13-201-137-73.ap-south-1.compute.amazonaws.com:8000/health
 
 or a local Vite UI (`http://localhost:5173`) with `VITE_USE_PRODUCTION_API=true` / `VITE_API_BASE_URL` pointing at EC2.
 
+When running the Vite UI **on the same Windows EC2** and opening it via the public DNS (`http://ec2-…:5173`), Vite must allow that host in `apps/frontend-react/vite.config.js` (`server.allowedHosts`). Restart Vite after changing the config. Also open Windows Firewall / SG for TCP `5173` if accessing remotely.
+
 When accessing from another machine on the LAN, open `http://<server-lan-ip>:5173`. The frontend rewrites the API host to that same LAN IP on port `8000` unless production mode is opted in.
