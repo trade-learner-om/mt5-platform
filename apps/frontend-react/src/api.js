@@ -45,12 +45,17 @@ function isAmplifyAppHost(hostname) {
   return Boolean(hostname) && String(hostname).toLowerCase().endsWith(".amplifyapp.com");
 }
 
-function isEc2ApiHost(hostname) {
+function isEc2PublicHost(hostname) {
   const host = String(hostname || "").toLowerCase();
-  return (
-    host === "ec2-13-201-137-73.ap-south-1.compute.amazonaws.com" ||
-    host === "13.201.137.73"
-  );
+  if (!host) return false;
+  if (host === "13.201.137.73") return true;
+  if (host === "ec2-13-201-137-73.ap-south-1.compute.amazonaws.com") return true;
+  // Any EC2 public DNS in this region (IP may change after stop/start).
+  return /^ec2-\d+-\d+-\d+-\d+\.ap-south-1\.compute\.amazonaws\.com$/.test(host);
+}
+
+function isEc2ApiHost(hostname) {
+  return isEc2PublicHost(hostname);
 }
 
 function localApiBaseForBrowser(hostname) {
@@ -65,6 +70,12 @@ function resolveBrowserBase(value) {
   const browserHost = window.location.hostname;
   if (PRODUCTION_APP_HOSTS.has(browserHost) || isAmplifyAppHost(browserHost)) {
     return PRODUCTION_API_BASE;
+  }
+
+  // UI served from the Windows EC2 public DNS / IP — API is on the same host :8000.
+  // Do not use localhost from .env.development (that would hit the user's laptop).
+  if (isEc2PublicHost(browserHost)) {
+    return localApiBaseForBrowser(browserHost);
   }
 
   if (isLocalDevHost(browserHost) || isPrivateLanHost(browserHost)) {

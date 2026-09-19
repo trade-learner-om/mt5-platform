@@ -67,4 +67,6 @@ or a local Vite UI (`http://localhost:5173`) with `VITE_USE_PRODUCTION_API=true`
 
 When running the Vite UI **on the same Windows EC2** and opening it via the public DNS (`http://ec2-…:5173`), Vite must allow that host in `apps/frontend-react/vite.config.js` (`server.allowedHosts`). Restart Vite after changing the config. Also open Windows Firewall / SG for TCP `5173` if accessing remotely.
 
+`api.js` maps that same public hostname to `http://<ec2-host>:8000` so the browser does not call `localhost:8000` from `.env.development` (which would hit the client machine and show `ERR_CONNECTION_REFUSED`).
+
 When accessing from another machine on the LAN, open `http://<server-lan-ip>:5173`. The frontend rewrites the API host to that same LAN IP on port `8000` unless production mode is opted in.

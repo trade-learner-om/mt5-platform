@@ -62,13 +62,17 @@ class Settings(BaseModel):
             "CORS_ORIGINS",
             "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,"
             "https://signalbridge.in,https://www.signalbridge.in,https://app.signalbridge.in,"
-            "https://main.d3inecn5vye1xf.amplifyapp.com",
+            "https://main.d3inecn5vye1xf.amplifyapp.com,"
+            "http://ec2-13-201-137-73.ap-south-1.compute.amazonaws.com:5173,"
+            "http://13.201.137.73:5173",
         ).split(",")
         if origin.strip()
     ]
     cors_origin_regex: str = os.getenv(
         "CORS_ORIGIN_REGEX",
-        r"https://([\w-]+\.)*signalbridge\.in|https://([\w-]+)\.amplifyapp\.com",
+        r"https://([\w-]+\.)*signalbridge\.in|https://([\w-]+)\.amplifyapp\.com|"
+        r"http://ec2-\d+-\d+-\d+-\d+\.ap-south-1\.compute\.amazonaws\.com:5173|"
+        r"http://13\.201\.137\.73:5173",
     ).strip()
 
 
