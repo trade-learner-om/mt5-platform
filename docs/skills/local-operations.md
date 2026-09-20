@@ -43,7 +43,7 @@ VITE_USE_PRODUCTION_API=true
 ## Hosted Amplify + Windows EC2
 
 - UI: `https://main.d3inecn5vye1xf.amplifyapp.com`
-- API: `http://ec2-13-201-137-73.ap-south-1.compute.amazonaws.com:8000` (also `http://13.201.137.73:8000`)
+- API: `http://ec2-13-232-110-145.ap-south-1.compute.amazonaws.com:8000` (also `http://13.232.110.145:8000`)
 - Production builds embed the EC2 URL via `apps/frontend-react/.env.production` and `PRODUCTION_API_BASE` in `src/api.js`.
 
 Public reachability on the Windows EC2 requires **both**:
@@ -60,7 +60,7 @@ Backend CORS defaults allow `https://main.d3inecn5vye1xf.amplifyapp.com` and `ht
 **Mixed content:** Amplify serves HTTPS. Browsers block calls from that page to the current HTTP API until TLS is terminated on EC2 (or a HTTPS proxy). Until then, verify with:
 
 ```bash
-curl http://ec2-13-201-137-73.ap-south-1.compute.amazonaws.com:8000/health
+curl http://ec2-13-232-110-145.ap-south-1.compute.amazonaws.com:8000/health
 ```
 
 or a local Vite UI (`http://localhost:5173`) with `VITE_USE_PRODUCTION_API=true` / `VITE_API_BASE_URL` pointing at EC2.

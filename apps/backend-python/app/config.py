@@ -63,8 +63,8 @@ class Settings(BaseModel):
             "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,"
             "https://signalbridge.in,https://www.signalbridge.in,https://app.signalbridge.in,"
             "https://main.d3inecn5vye1xf.amplifyapp.com,"
-            "http://ec2-13-201-137-73.ap-south-1.compute.amazonaws.com:5173,"
-            "http://13.201.137.73:5173",
+            "http://ec2-13-232-110-145.ap-south-1.compute.amazonaws.com:5173,"
+            "http://13.232.110.145:5173",
         ).split(",")
         if origin.strip()
     ]
@@ -72,20 +72,20 @@ class Settings(BaseModel):
         "CORS_ORIGIN_REGEX",
         r"https://([\w-]+\.)*signalbridge\.in|https://([\w-]+)\.amplifyapp\.com|"
         r"http://ec2-\d+-\d+-\d+-\d+\.ap-south-1\.compute\.amazonaws\.com:5173|"
-        r"http://13\.201\.137\.73:5173",
+        r"http://13\.232\.110\.145:5173",
     ).strip()
 
 
 # Always keep hosted Vite/Amplify origins even when .env overrides CORS_ORIGINS with an older list.
 _REQUIRED_CORS_ORIGINS = (
     "https://main.d3inecn5vye1xf.amplifyapp.com",
-    "http://ec2-13-201-137-73.ap-south-1.compute.amazonaws.com:5173",
-    "http://13.201.137.73:5173",
+    "http://ec2-13-232-110-145.ap-south-1.compute.amazonaws.com:5173",
+    "http://13.232.110.145:5173",
 )
 _REQUIRED_CORS_REGEX_PARTS = (
     r"https://([\w-]+)\.amplifyapp\.com",
     r"http://ec2-\d+-\d+-\d+-\d+\.ap-south-1\.compute\.amazonaws\.com:5173",
-    r"http://13\.201\.137\.73:5173",
+    r"http://13\.232\.110\.145:5173",
 )
 
 

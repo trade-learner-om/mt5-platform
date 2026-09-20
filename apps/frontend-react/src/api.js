@@ -4,7 +4,7 @@ function envFlagEnabled(value) {
 }
 
 /** Hosted / production API (also used by `.env.production` builds). */
-export const PRODUCTION_API_BASE = "http://ec2-13-201-137-73.ap-south-1.compute.amazonaws.com:8000";
+export const PRODUCTION_API_BASE = "http://ec2-13-232-110-145.ap-south-1.compute.amazonaws.com:8000";
 
 /** Default local backend when UI is opened on localhost / LAN. */
 export const LOCAL_API_BASE = "http://localhost:8000";
@@ -48,8 +48,8 @@ function isAmplifyAppHost(hostname) {
 function isEc2PublicHost(hostname) {
   const host = String(hostname || "").toLowerCase();
   if (!host) return false;
-  if (host === "13.201.137.73") return true;
-  if (host === "ec2-13-201-137-73.ap-south-1.compute.amazonaws.com") return true;
+  if (host === "13.232.110.145") return true;
+  if (host === "ec2-13-232-110-145.ap-south-1.compute.amazonaws.com") return true;
   // Any EC2 public DNS in this region (IP may change after stop/start).
   return /^ec2-\d+-\d+-\d+-\d+\.ap-south-1\.compute\.amazonaws\.com$/.test(host);
 }

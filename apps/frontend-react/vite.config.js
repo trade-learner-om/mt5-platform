@@ -8,9 +8,9 @@ export default defineConfig({
     port: 5173,
     // Allow browsing the Vite UI via the Windows EC2 public DNS / IP hostname.
     allowedHosts: [
-      "ec2-13-201-137-73.ap-south-1.compute.amazonaws.com",
+      "ec2-13-232-110-145.ap-south-1.compute.amazonaws.com",
       ".ap-south-1.compute.amazonaws.com",
-      "13.201.137.73",
+      "13.232.110.145",
     ],
   },
   build: {
