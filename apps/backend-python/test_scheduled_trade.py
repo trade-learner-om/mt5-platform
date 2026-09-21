@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 from app.services.order_placement import place_pending_order_with_limit_fallback
 from app.services.scheduled_trade_levels import (
     buy_entry_sl,
+    chart_price_from_tick,
     entry_sl_for_side,
     is_oversized_signal_candle,
     resolve_side_from_level,
@@ -59,6 +60,12 @@ class ScheduledTradeLevelsTests(unittest.TestCase):
         self.assertEqual(usable_target("SELL", 100.0, 101.0, 96.0), 96.0)
         self.assertEqual(usable_target("BUY", 100.0, 99.0, 104.0), 104.0)
 
+    def test_chart_price_prefers_bid_not_mid(self):
+        self.assertAlmostEqual(chart_price_from_tick({"bid": 2650.0, "ask": 2650.5}), 2650.0)
+        self.assertAlmostEqual(chart_price_from_tick({"price": 2649.0}), 2649.0)
+        self.assertAlmostEqual(chart_price_from_tick({"ask": 2651.0}), 2651.0)
+        self.assertEqual(chart_price_from_tick({}), 0.0)
+
 
 class ScheduledTradePlacementTests(unittest.TestCase):
     def test_primary_invalid_price_falls_back_to_limit(self):
@@ -75,6 +82,29 @@ class ScheduledTradePlacementTests(unittest.TestCase):
         self.assertIsNotNone(result["fallback"])
         self.assertEqual(service.place_pending_order.await_count, 2)
 
+    def test_primary_buy_invalid_price_also_falls_back_to_limit(self):
+        service = AsyncMock()
+        service.place_pending_order = AsyncMock(
+            side_effect=[
+                Exception("MT5 order rejected: retcode=10015 comment=Invalid price"),
+                {"orderId": "limit-buy-1"},
+            ]
+        )
+        payload = {
+            "order_type": "SL",
+            "side": "BUY",
+            "entry": 2652.01,
+            "stop_loss": 2646.97,
+            "quantity": 0.1,
+            "symbol": "XAUUSD",
+        }
+        result = asyncio.run(place_pending_order_with_limit_fallback(service, "token", "acc", payload))
+        self.assertEqual(result["order_type"], "LIMIT")
+        self.assertEqual(result["result"]["orderId"], "limit-buy-1")
+        limit_call = service.place_pending_order.await_args_list[1]
+        self.assertEqual(limit_call.args[2]["order_type"], "LIMIT")
+        self.assertEqual(limit_call.args[2]["entry"], 2652.01)
+
     def test_retry_leg_uses_direct_sl_not_fallback_helper(self):
         source = RUNTIME_PATH.read_text(encoding="utf-8")
         start = source.index("async def _place_retry_immediate")
@@ -85,6 +115,16 @@ class ScheduledTradePlacementTests(unittest.TestCase):
         self.assertIn("LIMIT fallback disabled", method)
         self.assertIn("RETRY_INITIATED", source)
         self.assertIn("RETRY_ORDER_PLACED", source)
+
+    def test_runtime_uses_bid_chart_price_and_lifecycle_logs(self):
+        source = RUNTIME_PATH.read_text(encoding="utf-8")
+        self.assertIn("chart_price_from_tick", source)
+        self.assertNotIn("_mid_from_price", source)
+        self.assertIn("Scheduled trade level broken", source)
+        self.assertIn("Scheduled trade %s signal candle", source)
+        self.assertIn("Scheduled trade LIMIT fallback placed", source)
+        self.assertIn("Scheduled trade order filled", source)
+        self.assertIn("Scheduled trade exit", source)
 
 
 if __name__ == "__main__":

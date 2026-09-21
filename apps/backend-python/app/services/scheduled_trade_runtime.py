@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from weakref import WeakKeyDictionary
@@ -30,6 +30,8 @@ from .scheduled_trade_levels import (
     ORDER_TRACKING_STATUSES,
     PRICE_EPSILON,
     WATCHING_STATUSES,
+    candle_range_pips,
+    chart_price_from_tick,
     entry_sl_for_side,
     is_green,
     is_oversized_signal_candle,
@@ -67,24 +69,18 @@ def _broker_info_from_account(account: Optional[dict]) -> dict:
     return {key: value for key, value in broker_info.items() if value}
 
 
-def _mid_from_price(price: dict) -> float:
-    bid = price.get("bid")
-    ask = price.get("ask")
-    try:
-        bid_f = float(bid) if bid is not None else 0.0
-        ask_f = float(ask) if ask is not None else 0.0
-    except (TypeError, ValueError):
-        bid_f = ask_f = 0.0
-    if bid_f > 0 and ask_f > 0:
-        return (bid_f + ask_f) / 2.0
-    for key in ("price", "bid", "ask"):
-        try:
-            value = float(price.get(key) or 0)
-        except (TypeError, ValueError):
-            value = 0.0
-        if value > 0:
-            return value
-    return 0.0
+def _schedule_log_prefix(doc: dict) -> str:
+    return (
+        f"schedule={doc.get('_id')} symbol={doc.get('symbol')} side={doc.get('side')} "
+        f"tf={doc.get('timeframe')} status={doc.get('status')} level={doc.get('level')}"
+    )
+
+
+def _candle_log(candle: dict) -> str:
+    return (
+        f"o={candle.get('open')} h={candle.get('high')} "
+        f"l={candle.get('low')} c={candle.get('close')} time={candle.get('time')}"
+    )
 
 
 def _serialize_schedule(doc: dict) -> dict:
@@ -382,7 +378,7 @@ class ScheduledTradeManager:
         )
         if not docs:
             return
-        tick_price = _mid_from_price(price)
+        tick_price = chart_price_from_tick(price)
         if tick_price <= 0:
             return
         tick_time = self._resolve_tick_time(price)
@@ -561,9 +557,19 @@ class ScheduledTradeManager:
         level = float(doc.get("level") or 0)
         symbol = str(doc.get("symbol") or "")
         pip_size = float(doc.get("pip_size") or scheduled_pip_size(symbol))
+        close = candle.get("close")
 
         if status == "INITIATED":
             if level_broken_on_close(side, candle, level):
+                direction = "below" if side == "BUY" else "above"
+                logger.info(
+                    "Scheduled trade level broken | %s close=%s %s level=%s candle=[%s]",
+                    _schedule_log_prefix(doc),
+                    close,
+                    direction,
+                    level,
+                    _candle_log(candle),
+                )
                 updates = {"status": "ARMED", "armed_at": _utc_now(), "updated_at": _utc_now(), "last_error": None}
                 await db[COLLECTION].update_one_async({"_id": doc["_id"]}, {"$set": updates})
                 doc.update(updates)
@@ -572,21 +578,43 @@ class ScheduledTradeManager:
                     doc,
                     "SCHEDULE_ARMED",
                     "ARMED",
-                    f"{side} level broken on close {candle.get('close')} vs level {level}",
+                    f"{side} level broken on close {close} vs level {level}",
                     {"candle": candle, "level": level},
                 )
             return
 
         if status == "ARMED":
             signal_ok = is_red(candle) if side == "SELL" else is_green(candle)
+            needed = "red" if side == "SELL" else "green"
             if not signal_ok:
+                logger.info(
+                    "Scheduled trade waiting for %s candle | %s candle=[%s]",
+                    needed,
+                    _schedule_log_prefix(doc),
+                    _candle_log(candle),
+                )
                 return
+            logger.info(
+                "Scheduled trade %s signal candle | %s candle=[%s]",
+                needed,
+                _schedule_log_prefix(doc),
+                _candle_log(candle),
+            )
             if is_oversized_signal_candle(
                 candle,
                 symbol,
                 pip_size,
                 max_pips=doc.get("max_signal_candle_pips"),
             ):
+                range_pips = candle_range_pips(candle, pip_size)
+                max_pips = doc.get("max_signal_candle_pips")
+                logger.info(
+                    "Scheduled trade signal candle oversized | %s range_pips=%s max_pips=%s candle=[%s]",
+                    _schedule_log_prefix(doc),
+                    range_pips,
+                    max_pips,
+                    _candle_log(candle),
+                )
                 await self._append_event(
                     db,
                     doc,
@@ -595,7 +623,8 @@ class ScheduledTradeManager:
                     "Signal candle oversized; waiting for next valid candle",
                     {
                         "candle": candle,
-                        "max_signal_candle_pips": doc.get("max_signal_candle_pips"),
+                        "max_signal_candle_pips": max_pips,
+                        "range_pips": range_pips,
                     },
                 )
                 return
@@ -651,6 +680,12 @@ class ScheduledTradeManager:
             account_currency=str(account.get("account_currency") or "USD"),
         )
         if quantity <= 0:
+            logger.info(
+                "Scheduled trade placement skipped | %s reason=risk_too_small entry=%s stop_loss=%s",
+                _schedule_log_prefix(doc),
+                entry,
+                stop_loss,
+            )
             await self._set_error(db, doc, "Risk amount is too small for broker minimum volume.")
             return
 
@@ -673,6 +708,14 @@ class ScheduledTradeManager:
             "target": target,
             "quantity": quantity,
         }
+        logger.info(
+            "Scheduled trade placing SL | %s entry=%s stop_loss=%s qty=%s target=%s",
+            _schedule_log_prefix(doc),
+            entry,
+            stop_loss,
+            quantity,
+            target,
+        )
         try:
             placement = await place_pending_order_with_limit_fallback(
                 metaapi_service,
@@ -682,6 +725,14 @@ class ScheduledTradeManager:
             )
         except Exception as exc:
             failure = str(exc)
+            logger.info(
+                "Scheduled trade placement failed | %s error=%s entry=%s stop_loss=%s qty=%s",
+                _schedule_log_prefix(doc),
+                failure,
+                entry,
+                stop_loss,
+                quantity,
+            )
             await db.orders.update_one_async(
                 {"_id": order_doc["_id"]},
                 {"$set": {"status": "FAILED", "failure_reason": failure, "updated_at": _utc_now()}},
@@ -703,6 +754,16 @@ class ScheduledTradeManager:
         }
         await db.orders.update_one_async({"_id": order_doc["_id"]}, {"$set": order_updates})
         if fallback:
+            logger.info(
+                "Scheduled trade LIMIT fallback placed | %s entry=%s stop_loss=%s qty=%s "
+                "meta_order_id=%s sl_error=%s",
+                _schedule_log_prefix(doc),
+                entry,
+                stop_loss,
+                quantity,
+                meta_order_id,
+                fallback.get("sl_placement_error"),
+            )
             self._save_order_event(
                 db,
                 doc["user_id"],
@@ -714,6 +775,15 @@ class ScheduledTradeManager:
                 symbol=doc["symbol"],
                 broker_info=doc.get("broker_info"),
                 placement_fallback_reason=fallback.get("fallback_reason"),
+            )
+        else:
+            logger.info(
+                "Scheduled trade SL placed | %s entry=%s stop_loss=%s qty=%s meta_order_id=%s",
+                _schedule_log_prefix(doc),
+                entry,
+                stop_loss,
+                quantity,
+                meta_order_id,
             )
 
         schedule_updates = {
@@ -789,6 +859,14 @@ class ScheduledTradeManager:
             note = failure
             if is_invalid_price_error(exc):
                 note = f"{failure} (retry SL-only; LIMIT fallback disabled)"
+            logger.info(
+                "Scheduled trade retry placement failed | %s error=%s entry=%s stop_loss=%s qty=%s",
+                _schedule_log_prefix(doc),
+                note,
+                entry,
+                stop_loss,
+                quantity,
+            )
             await db.orders.update_one_async(
                 {"_id": order_doc["_id"]},
                 {"$set": {"status": "FAILED", "failure_reason": note, "updated_at": _utc_now()}},
@@ -798,6 +876,14 @@ class ScheduledTradeManager:
             return
 
         meta_order_id = str(result.get("orderId") or result.get("id") or "")
+        logger.info(
+            "Scheduled trade retry SL placed | %s entry=%s stop_loss=%s qty=%s meta_order_id=%s",
+            _schedule_log_prefix(doc),
+            entry,
+            stop_loss,
+            quantity,
+            meta_order_id,
+        )
         await db.orders.update_one_async(
             {"_id": order_doc["_id"]},
             {"$set": {"meta_order_id": meta_order_id, "status": "PENDING", "failure_reason": None, "updated_at": _utc_now()}},
@@ -912,6 +998,15 @@ class ScheduledTradeManager:
 
         if status in {"ORDER_PLACED", "RETRY_ORDER_PLACED"} and order_status in {"FILLED", "POSITION_OPEN", "PARTIALLY_CLOSED"}:
             next_status = "RETRY_ORDER_FILLED" if is_retry_leg else "ORDER_FILLED"
+            fill_price = order.get("entry") or order.get("fill_price") or order.get("open_price")
+            logger.info(
+                "Scheduled trade order filled | %s next_status=%s order_status=%s fill_price=%s order_id=%s",
+                _schedule_log_prefix(doc),
+                next_status,
+                order_status,
+                fill_price,
+                order_id,
+            )
             updates = {"status": next_status, "filled_at": _utc_now(), "updated_at": _utc_now(), "last_error": None}
             if order.get("meta_position_id"):
                 updates["meta_position_id"] = order.get("meta_position_id")
@@ -922,12 +1017,25 @@ class ScheduledTradeManager:
 
         if status in {"ORDER_PLACED", "RETRY_ORDER_PLACED"} and order_status == "CANCELLED":
             next_status = "RETRY_CANCELLED" if is_retry_leg else "CANCELLED"
+            logger.info(
+                "Scheduled trade pending cancelled | %s next_status=%s order_id=%s",
+                _schedule_log_prefix(doc),
+                next_status,
+                order_id,
+            )
             await self._set_status(db, doc, next_status, "ORDER_CANCELLED", "Linked pending order cancelled")
             self._drop_runtime(str(doc["_id"]))
             return
 
         if status in {"ORDER_FILLED", "RETRY_ORDER_FILLED", "ORDER_PLACED", "RETRY_ORDER_PLACED"} and order_status == "CLOSED":
             exit_status = self._classify_exit(order, is_retry_leg=is_retry_leg)
+            logger.info(
+                "Scheduled trade exit | %s exit_status=%s realized_pl=%s order_id=%s",
+                _schedule_log_prefix(doc),
+                exit_status,
+                order.get("realized_pl"),
+                order_id,
+            )
             await self._set_status(db, doc, exit_status, exit_status, f"Linked order closed → {exit_status}")
             if exit_status == "STOP_EXIT":
                 await self._maybe_start_retry(db, {**doc, "status": exit_status})
@@ -1007,6 +1115,11 @@ class ScheduledTradeManager:
         await self._append_event(db, doc, event_type, status, message)
 
     async def _set_error(self, db, doc: dict, message: str) -> None:
+        logger.info(
+            "Scheduled trade error | %s last_error=%s",
+            _schedule_log_prefix(doc),
+            message,
+        )
         updates = {"last_error": message, "updated_at": _utc_now()}
         await db[COLLECTION].update_one_async({"_id": doc["_id"]}, {"$set": updates})
         doc.update(updates)

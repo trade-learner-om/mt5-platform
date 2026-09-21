@@ -1,6 +1,9 @@
 from typing import Any, Optional
+import logging
 
 from .order_logging import append_order_log_prices
+
+logger = logging.getLogger(__name__)
 
 SL_LIMIT_FALLBACK_REASON = (
     "SL (stop-entry) was rejected as Invalid price for the current market. "
@@ -63,6 +66,14 @@ async def place_pending_order_with_limit_fallback(service, token: str, account_i
         if not is_invalid_price_error(exc):
             raise
         sl_error = str(exc)
+        logger.info(
+            "SL Invalid price; attempting LIMIT fallback | symbol=%s side=%s entry=%s stop_loss=%s error=%s",
+            payload.get("symbol"),
+            payload.get("side"),
+            payload.get("entry"),
+            payload.get("stop_loss"),
+            sl_error,
+        )
         limit_payload = {**payload, "order_type": "LIMIT"}
         result = await service.place_pending_order(token, account_id, limit_payload)
         return {

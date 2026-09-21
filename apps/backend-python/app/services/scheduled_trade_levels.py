@@ -76,6 +76,15 @@ def as_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def chart_price_from_tick(price: Mapping[str, Any]) -> float:
+    """Bid-based OHLC source matching MT5 charts and Master Break (not mid)."""
+    for key in ("bid", "price", "ask"):
+        value = as_float(price.get(key), 0.0)
+        if value > 0:
+            return value
+    return 0.0
+
+
 def normalize_scheduled_timeframe(value: str) -> str:
     key = str(value or "").strip().upper()
     aliases = {"1M": "M1", "5M": "M5", "15M": "M15", "1MIN": "M1", "5MIN": "M5", "15MIN": "M15"}

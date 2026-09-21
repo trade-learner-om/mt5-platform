@@ -30,9 +30,17 @@ v1 retry places the **identical SL immediately** after stop-out (no second candl
 
 Signal candles larger than `max_signal_candle_pips` are skipped (`SIGNAL_CANDLE_SKIPPED`) until a valid candle appears. Defaults: **10** FX pips, **100** XAU/GOLD. Create payload / schedule field: `max_signal_candle_pips`.
 
+## Candle source
+
+Live ExecCandle rolls use **bid** (same as Master Break / MT5 charts), not mid. Chart seed candles at create remain bid-based from MT5 history.
+
+## Lifecycle logging
+
+`scheduled_trade_runtime` emits INFO logs for: level break (close above/below user level), green/red signal (and wait/oversized skip), SL placed, LIMIT fallback, placement failure, fill, and TARGET/STOP (or other) exit. Grep `Scheduled trade` in backend logs.
+
 ## UI
 
-Root sidebar → **Scheduled Trade** (`ScheduledTradePanel`): create form (Retryable order default **off**) + lifecycle list. Page id: `scheduled-trade`.
+Root sidebar → **Scheduled Trade** (`ScheduledTradePanel`): create form (Retryable order default **off**) + lifecycle list. Page id: `scheduled-trade`. Notes prefer `last_error` when set.
 
 ## Implementation
 

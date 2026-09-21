@@ -415,13 +415,15 @@ export default function ScheduledTradePanel({
                       {row.entry != null ? `${formatPrice(row.entry)} / ${formatPrice(row.stop_loss)}` : "—"}
                     </td>
                     <td className="px-3 py-2 text-xs text-slate-500">
-                      {row.placement_order_type === "LIMIT" || row.placement_fallback_reason
-                        ? "LIMIT fallback"
-                        : row.retryable_order
-                          ? row.retry_used
-                            ? "Retry used"
-                            : "Retryable"
-                          : row.last_error || "—"}
+                      {row.last_error
+                        ? row.last_error
+                        : row.placement_order_type === "LIMIT" || row.placement_fallback_reason
+                          ? "LIMIT fallback"
+                          : row.retryable_order
+                            ? row.retry_used
+                              ? "Retry used"
+                              : "Retryable"
+                            : "—"}
                     </td>
                     <td className="px-3 py-2 text-right">
                       {CANCELLABLE.has(String(row.status || "").toUpperCase()) ? (
