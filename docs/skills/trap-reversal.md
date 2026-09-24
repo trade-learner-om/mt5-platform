@@ -14,8 +14,11 @@ Do not revive removed strategy route families (see `docs/skills/automation.md`).
 
 ## Engine design
 
-- H1 supports/resistances indexed once per start with `scipy.signal.find_peaks`.
-- Forward-pass monotonic stack drops already-mitigated H1 levels before live start.
+- H1 supports/resistances indexed once per start via pandas unmitigated swing detection
+  (`app.services.analytics.market_structure.calculate_unmitigated_levels`, fractal lookback 5).
+- Forward chronological mitigation drops levels breached by a later candle wick before live start.
+- Shared helpers also live on `candle_history.unmitigated_levels_for_candles` /
+  `get_unmitigated_levels_for_symbol` for per-timeframe structure on cached MT5 candles.
 - Live routing is `O(1)` per symbol into a dedicated `DoubleTrapFSM`.
 - Each FSM uses scalar prices and a tiny rolling M1 candle buffer (no pandas on the tick path).
 

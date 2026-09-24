@@ -20,6 +20,10 @@ The endpoint delegates to `apps/backend-python/app/services/candle_history.py`. 
 
 Live M1 candle formation is handled by `apps/backend-python/app/services/m1_candle_builder.py`. The stream manager queues every received tick per session and processes ticks sequentially, so live high/low formation does not drop intermediate ticks. Live OHLC values use the MT5 chart convention of bid-based candles, falling back to `price` or `ask` only if bid is unavailable.
 
+## Unmitigated swing levels
+
+`unmitigated_levels_for_candles` / `get_unmitigated_levels_for_symbol` in `candle_history.py` convert Mongo/MT5 candle lists into active swing highs and lows via `app.services.analytics.market_structure`. Trap Reversal H1 indexing uses the same detector. Do not restore the removed `/analysis/unmitigated-swings` or `/analysis/market-structure` routes.
+
 ## MongoDB Scope
 
 Chart candles are stored in `candles` with broker/account scope:

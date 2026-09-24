@@ -10,8 +10,11 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
-from scipy.signal import find_peaks
 
+from .analytics.market_structure import (
+    calculate_unmitigated_levels,
+    supports_and_resistances_from_levels,
+)
 from .metaapi_client import metaapi_service
 from .order_placement import place_pending_order_with_limit_fallback
 from .risk import (
@@ -22,6 +25,9 @@ from .risk import (
     point_size_from_symbol_spec,
 )
 from .symbol_resolver import normalize_symbol
+
+# Fractal half-window for H1 structural S/R (11-bar confirmation).
+TRAP_REVERSAL_H1_SWING_LENGTH = 5
 
 
 def _prepare_dataframe(df: pd.DataFrame) -> pd.DataFrame:
@@ -36,36 +42,18 @@ def _prepare_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def index_h1_levels(df: pd.DataFrame) -> tuple[list[float], list[float]]:
+    """Index still-active H1 supports/resistances via unmitigated swing tracking."""
     frame = _prepare_dataframe(df)
-    highs = frame["high"].astype(float).to_numpy()
-    lows = frame["low"].astype(float).to_numpy()
-    if len(frame) < 5:
+    if len(frame) < (2 * TRAP_REVERSAL_H1_SWING_LENGTH + 1):
         return [], []
-
-    high_peaks, _ = find_peaks(highs, distance=2)
-    low_peaks, _ = find_peaks(-lows, distance=2)
-    high_peak_set = set(int(index) for index in high_peaks.tolist())
-    low_peak_set = set(int(index) for index in low_peaks.tolist())
-
-    active_supports: list[float] = []
-    active_resistances: list[float] = []
-
-    for idx, row in enumerate(frame.itertuples(index=False)):
-        high = float(row.high)
-        low = float(row.low)
-        while active_resistances and high > active_resistances[-1]:
-            active_resistances.pop()
-        while active_supports and low < active_supports[-1]:
-            active_supports.pop()
-
-        if idx in high_peak_set:
-            active_resistances.append(high)
-        if idx in low_peak_set:
-            active_supports.append(low)
-
-    supports = sorted({round(price, 10) for price in active_supports})
-    resistances = sorted({round(price, 10) for price in active_resistances})
-    return supports, resistances
+    levels = calculate_unmitigated_levels(
+        frame,
+        swing_length=TRAP_REVERSAL_H1_SWING_LENGTH,
+        use_atr_filter=False,
+        use_volume_filter=False,
+        mitigate_on="wick",
+    )
+    return supports_and_resistances_from_levels(levels)
 
 
 @dataclass

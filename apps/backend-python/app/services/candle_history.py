@@ -1,9 +1,15 @@
 from datetime import datetime, timedelta, timezone
 import logging
-from typing import Optional
+from typing import Any, Optional, Sequence
 
 from pymongo import UpdateOne
 
+from .analytics.market_structure import (
+    DEFAULT_SWING_LENGTH,
+    calculate_unmitigated_levels,
+    candles_to_ohlcv_frame,
+    supports_and_resistances_from_levels,
+)
 from .metaapi_client import metaapi_service
 
 logger = logging.getLogger(__name__)
@@ -722,3 +728,85 @@ async def get_backtest_m5_candles(
         upsert_candles(db, account, symbol, normalized_timeframe, normalized_fetched)
         cached = load_cached_candles(db, account, symbol, normalized_timeframe, from_time, to_time, max_bars)
     return [serialize_chart_candle(doc) for doc in cached]
+
+
+def unmitigated_levels_for_candles(
+    candles: Sequence[dict[str, Any]],
+    *,
+    swing_length: int = DEFAULT_SWING_LENGTH,
+    atr_adaptive: bool = False,
+    use_atr_filter: bool = False,
+    use_volume_filter: bool = False,
+    mitigate_on: str = "wick",
+    include_mitigated: bool = False,
+) -> list[dict[str, Any]]:
+    """Compute active unmitigated swing highs/lows for a candle list (any timeframe)."""
+    frame = candles_to_ohlcv_frame(list(candles))
+    return calculate_unmitigated_levels(
+        frame,
+        swing_length=int(swing_length),
+        atr_adaptive=bool(atr_adaptive),
+        use_atr_filter=bool(use_atr_filter),
+        use_volume_filter=bool(use_volume_filter),
+        mitigate_on=mitigate_on,  # type: ignore[arg-type]
+        include_mitigated=bool(include_mitigated),
+    )
+
+
+def unmitigated_supports_resistances_for_candles(
+    candles: Sequence[dict[str, Any]],
+    *,
+    swing_length: int = DEFAULT_SWING_LENGTH,
+    atr_adaptive: bool = False,
+    use_atr_filter: bool = False,
+    use_volume_filter: bool = False,
+) -> tuple[list[float], list[float]]:
+    """Return sorted support/resistance prices from unmitigated swings on candle history."""
+    levels = unmitigated_levels_for_candles(
+        candles,
+        swing_length=swing_length,
+        atr_adaptive=atr_adaptive,
+        use_atr_filter=use_atr_filter,
+        use_volume_filter=use_volume_filter,
+    )
+    return supports_and_resistances_from_levels(levels)
+
+
+async def get_unmitigated_levels_for_symbol(
+    db,
+    account: dict,
+    symbol: str,
+    timeframe: str,
+    *,
+    limit: int = 500,
+    swing_length: int = DEFAULT_SWING_LENGTH,
+    atr_adaptive: bool = False,
+    use_atr_filter: bool = False,
+    use_volume_filter: bool = False,
+) -> dict[str, Any]:
+    """Mongo-first candle load + unmitigated swing levels for a symbol/timeframe."""
+    candles = await get_recent_chart_candles(
+        db,
+        account,
+        symbol,
+        timeframe,
+        limit=int(limit),
+        min_bars=max(20, 2 * int(swing_length) + 1),
+        force_broker_refresh=False,
+    )
+    levels = unmitigated_levels_for_candles(
+        candles,
+        swing_length=swing_length,
+        atr_adaptive=atr_adaptive,
+        use_atr_filter=use_atr_filter,
+        use_volume_filter=use_volume_filter,
+    )
+    supports, resistances = supports_and_resistances_from_levels(levels)
+    return {
+        "timeframe": normalize_timeframe(timeframe),
+        "bar_count": len(candles),
+        "swing_length": int(swing_length),
+        "levels": levels,
+        "supports": supports,
+        "resistances": resistances,
+    }
