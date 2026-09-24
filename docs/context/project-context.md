@@ -21,7 +21,7 @@ Docker is not used. The backend must run on the same local Windows system where 
 
 ## Backend Workflow
 
-The backend exposes route contracts including `/auth/*`, `/admin/users`, `/accounts`, `/market/select`, `/watchlist`, `/market-price`, `/risk-preview`, `/orders`, `/trade-planner/*`, `/trap-reversal/*`, `/master-break/*`, `/scheduled-trades/*`, and `/ws/live`. The old `/automation/reversal-5m/*`, `/analysis/market-structure`, `/analysis/unmitigated-swings`, `/gold-strategy/*`, `/continuation-failure/*`, `/st-ema/*`, `/ema-vwap/*`, `/ema-wakeup/*`, `/st-rsi-div/*`, `/trap-hunter/*`, and `/trend-pilot/*` route families have been removed.
+The backend exposes route contracts including `/auth/*`, `/admin/users`, `/accounts`, `/market/select`, `/watchlist`, `/market-price`, `/risk-preview`, `/orders`, `/trade-planner/*`, `/trap-reversal/*`, `/master-break/*`, `/scheduled-trades/*`, `/structure/unmitigated-swings*`, and `/ws/live`. The old `/automation/reversal-5m/*`, `/analysis/market-structure`, `/analysis/unmitigated-swings`, `/gold-strategy/*`, `/continuation-failure/*`, `/st-ema/*`, `/ema-vwap/*`, `/ema-wakeup/*`, `/st-rsi-div/*`, `/trap-hunter/*`, and `/trend-pilot/*` route families have been removed.
 
 Application authentication uses bcrypt password hashes and JWT access tokens with a session id. International account creation accepts local MT5 login, password, and server, validates connectivity through `MetaTrader5.initialize(login=..., password=..., server=...)`, and stores an encrypted credential payload in `meta_accounts.api_token`.
 

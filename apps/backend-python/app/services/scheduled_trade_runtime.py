@@ -229,6 +229,7 @@ class ScheduledTradeManager:
         price_digits: int,
         max_signal_candle_pips: Optional[float] = None,
         seed_candles: Optional[list[dict]] = None,
+        extra_fields: Optional[dict[str, Any]] = None,
     ) -> dict:
         tf = normalize_scheduled_timeframe(timeframe)
         side = resolve_side_from_level(level, mid_price)
@@ -272,6 +273,10 @@ class ScheduledTradeManager:
             "exited_at": None,
             "events": [],
         }
+        if extra_fields:
+            for key, value in extra_fields.items():
+                if key and key not in doc:
+                    doc[key] = value
         result = await db[COLLECTION].insert_one_async(doc)
         doc["_id"] = result.inserted_id
         self._register_runtime(doc, seed_candles=seed_candles or [])
@@ -287,6 +292,7 @@ class ScheduledTradeManager:
                 "timeframe": tf,
                 "mid_price": mid_price,
                 "max_signal_candle_pips": max_candle_pips,
+                "source": doc.get("source"),
             },
         )
         return _serialize_schedule(doc)
@@ -581,6 +587,15 @@ class ScheduledTradeManager:
                     f"{side} level broken on close {close} vs level {level}",
                     {"candle": candle, "level": level},
                 )
+                if str(doc.get("source") or "") == "unmitigated_swings":
+                    from .structure_swings import mark_session_level_mitigated
+
+                    await mark_session_level_mitigated(
+                        db,
+                        structure_session_id=doc.get("structure_session_id"),
+                        structure_price=float(doc.get("structure_price") or level),
+                        structure_kind=doc.get("structure_kind"),
+                    )
             return
 
         if status == "ARMED":
@@ -642,7 +657,14 @@ class ScheduledTradeManager:
         entry, stop_loss = entry_sl_for_side(side, candle, point)
         entry = normalize_price_to_symbol(entry, {"digits": digits, "point": point})
         stop_loss = normalize_price_to_symbol(stop_loss, {"digits": digits, "point": point})
-        target = usable_target(side, entry, stop_loss, doc.get("target"))
+        if str(doc.get("source") or "") == "unmitigated_swings":
+            from .structure_swings import resolve_unmitigated_swing_target
+
+            target = resolve_unmitigated_swing_target(
+                side, entry, stop_loss, doc.get("structure_extreme")
+            )
+        else:
+            target = usable_target(side, entry, stop_loss, doc.get("target"))
 
         try:
             symbol_spec = await metaapi_service.get_symbol_specification(
@@ -657,7 +679,14 @@ class ScheduledTradeManager:
                 entry, stop_loss = entry_sl_for_side(side, candle, point)
                 entry = normalize_price_to_symbol(entry, {"digits": digits, "point": point})
                 stop_loss = normalize_price_to_symbol(stop_loss, {"digits": digits, "point": point})
-                target = usable_target(side, entry, stop_loss, doc.get("target"))
+                if str(doc.get("source") or "") == "unmitigated_swings":
+                    from .structure_swings import resolve_unmitigated_swing_target
+
+                    target = resolve_unmitigated_swing_target(
+                        side, entry, stop_loss, doc.get("structure_extreme")
+                    )
+                else:
+                    target = usable_target(side, entry, stop_loss, doc.get("target"))
         except Exception:
             symbol_spec = {"symbol": doc["symbol"], "digits": digits, "point": point}
 

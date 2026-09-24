@@ -23,6 +23,8 @@ Legacy strategy runtimes and route families have been deleted from backend and w
 
 Do not add new work to deleted strategy files. Mobile apps may still contain stale clients for GOLD Strategy / Trend Pilot — remove those clients rather than restoring routes.
 
+Allowed replacement for structure swings: `/structure/unmitigated-swings*` (library + Scheduled Break execute path).
+
 ## Shared tick path
 
 Live strategies consume ticks from `apps/backend-python/app/services/market_data_stream.py` after local MT5 polling or `WS /ws/mt5/ticks` ingest. Candle loading, symbol specs, risk sizing, and pending orders go through the local MT5 adapter (`docs/skills/mt5-integration.md`).

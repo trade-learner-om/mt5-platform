@@ -597,6 +597,22 @@ class ScheduledTradeCreateIn(BaseModel):
     retryable_order: bool = False
 
 
+class UnmitigatedSwingsQueryIn(BaseModel):
+    account_id: str
+    symbol: str
+    timeframe: str = "H1"
+    swing_count: int = Field(default=5, ge=1, le=50)
+
+
+class UnmitigatedSwingsExecuteIn(BaseModel):
+    account_id: str
+    symbol: str
+    structure_timeframe: str = "H1"
+    highs: List[float] = Field(default_factory=list)
+    lows: List[float] = Field(default_factory=list)
+    risk_amount: float = Field(..., gt=0)
+
+
 class ScheduledTradeOut(BaseModel):
     id: str
     account_id: Optional[str] = None

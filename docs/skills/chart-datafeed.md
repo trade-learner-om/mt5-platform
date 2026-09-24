@@ -22,7 +22,15 @@ Live M1 candle formation is handled by `apps/backend-python/app/services/m1_cand
 
 ## Unmitigated swing levels
 
-`unmitigated_levels_for_candles` / `get_unmitigated_levels_for_symbol` in `candle_history.py` convert Mongo/MT5 candle lists into active swing highs and lows via `app.services.analytics.market_structure`. Trap Reversal H1 indexing uses the same detector. Do not restore the removed `/analysis/unmitigated-swings` or `/analysis/market-structure` routes.
+`unmitigated_levels_for_candles` / `get_unmitigated_levels_for_symbol` in `candle_history.py` convert Mongo/MT5 candle lists into active swing highs and lows via `app.services.analytics.market_structure`. Trap Reversal H1 indexing uses the same detector.
+
+Product UI/API (distinct from removed `/analysis/*`):
+
+- `POST /structure/unmitigated-swings` — analyze H4/H1/M15
+- `POST /structure/unmitigated-swings/execute` — arm one-shot M1 Scheduled Break schedules per level
+- `GET /structure/unmitigated-swings/session/{id}` — Active/Mitigated session state
+
+Do not restore `/analysis/unmitigated-swings` or `/analysis/market-structure`.
 
 ## MongoDB Scope
 

@@ -79,6 +79,8 @@ from .schemas import (
     ScheduledTradeCreateIn,
     ScheduledTradeEventOut,
     ScheduledTradeOut,
+    UnmitigatedSwingsExecuteIn,
+    UnmitigatedSwingsQueryIn,
     UserUiSettingsUpdateIn,
     UserSnapshotOut,
     WatchlistItemOut,
@@ -142,6 +144,11 @@ from .services.master_break_settings import STRATEGY_TYPE as MASTER_BREAK_STRATE
 from .services.master_break_settings import MasterBreakSettings
 from .services.master_break_runtime import master_break_manager
 from .services.scheduled_trade_runtime import scheduled_trade_manager, seed_recent_candles
+from .services.structure_swings import (
+    analyze_unmitigated_swings,
+    execute_unmitigated_swings,
+    get_structure_session,
+)
 from .services.master_break_backtest import simulate_master_break_backtest
 from .services.master_break_backtest_persistence import (
     delete_backtest as delete_master_break_backtest,
@@ -4415,6 +4422,149 @@ async def list_master_break_backtest_trades(
     if page is None:
         raise HTTPException(status_code=404, detail="Master Break backtest not found")
     return page
+
+
+@app.post("/structure/unmitigated-swings")
+async def structure_unmitigated_swings_analyze(
+    data: UnmitigatedSwingsQueryIn,
+    user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    if _normalize_market_type(user.get("selected_market")) != "INTERNATIONAL":
+        raise HTTPException(status_code=400, detail="Unmitigated swings require an international MT5 account")
+    try:
+        account_oid = parse_object_id(data.account_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid account id")
+    account = await db.meta_accounts.find_one_async({"_id": account_oid, "user_id": user["_id"]})
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if str(account.get("market_type") or "INTERNATIONAL").upper() != "INTERNATIONAL":
+        raise HTTPException(status_code=400, detail="Unmitigated swings require an international MT5 account")
+
+    normalized_symbol = str(data.symbol or "").upper().strip()
+    if not normalized_symbol:
+        raise HTTPException(status_code=400, detail="Symbol is required")
+
+    mid = None
+    try:
+        broker_symbol = await _resolve_symbol_for_account(account, normalized_symbol)
+        try:
+            price = await metaapi_service.get_symbol_price(account["api_token"], account["account_id"], broker_symbol)
+            mid = _mid_price(price.get("bid"), price.get("ask"))
+        except Exception:
+            mid = None
+        result = await analyze_unmitigated_swings(
+            db,
+            account,
+            broker_symbol=broker_symbol,
+            requested_symbol=normalized_symbol,
+            display=display_symbol(normalized_symbol, broker_symbol),
+            timeframe=data.timeframe,
+            swing_count=int(data.swing_count),
+            mid_price=float(mid) if mid is not None else None,
+        )
+    except LocalMT5Error:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception(
+            "Unmitigated swings analyze failed | user=%s account=%s symbol=%s",
+            user["_id"],
+            data.account_id,
+            normalized_symbol,
+        )
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return result
+
+
+@app.post("/structure/unmitigated-swings/execute")
+async def structure_unmitigated_swings_execute(
+    data: UnmitigatedSwingsExecuteIn,
+    user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    if _normalize_market_type(user.get("selected_market")) != "INTERNATIONAL":
+        raise HTTPException(status_code=400, detail="Unmitigated swings require an international MT5 account")
+    try:
+        account_oid = parse_object_id(data.account_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid account id")
+    account = await db.meta_accounts.find_one_async({"_id": account_oid, "user_id": user["_id"]})
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if str(account.get("market_type") or "INTERNATIONAL").upper() != "INTERNATIONAL":
+        raise HTTPException(status_code=400, detail="Unmitigated swings require an international MT5 account")
+
+    normalized_symbol = str(data.symbol or "").upper().strip()
+    if not normalized_symbol:
+        raise HTTPException(status_code=400, detail="Symbol is required")
+    highs = [float(v) for v in (data.highs or [])]
+    lows = [float(v) for v in (data.lows or [])]
+    if not highs and not lows:
+        raise HTTPException(status_code=400, detail="At least one high or low level is required")
+
+    try:
+        broker_symbol = await _resolve_symbol_for_account(account, normalized_symbol)
+        symbol_spec = await _symbol_spec_for_account(account, broker_symbol)
+        price = await metaapi_service.get_symbol_price(account["api_token"], account["account_id"], broker_symbol)
+        mid = _mid_price(price.get("bid"), price.get("ask"))
+        if mid is None or float(mid) <= 0:
+            raise HTTPException(status_code=400, detail="Live mid price is unavailable")
+        point = point_size_from_symbol_spec(symbol_spec)
+        digits = digits_from_symbol_spec(symbol_spec)
+        seed = await seed_recent_candles(db, account, broker_symbol, "M1", limit=40)
+        result = await execute_unmitigated_swings(
+            db,
+            user,
+            account,
+            broker_symbol=broker_symbol,
+            requested_symbol=normalized_symbol,
+            display=display_symbol(normalized_symbol, broker_symbol),
+            structure_timeframe=data.structure_timeframe,
+            highs=highs,
+            lows=lows,
+            risk_amount=float(data.risk_amount),
+            mid_price=float(mid),
+            point_size=point,
+            price_digits=digits,
+            seed_candles=seed,
+        )
+    except HTTPException:
+        raise
+    except LocalMT5Error as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception(
+            "Unmitigated swings execute failed | user=%s account=%s symbol=%s",
+            user["_id"],
+            data.account_id,
+            normalized_symbol,
+        )
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await _ensure_market_data_stream(db, str(user["_id"]), force=True)
+    await live_state_hub.push_snapshot(db, str(user["_id"]))
+    return result
+
+
+@app.get("/structure/unmitigated-swings/session/{session_id}")
+async def structure_unmitigated_swings_session(
+    session_id: str,
+    user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    try:
+        session_oid = parse_object_id(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session id")
+    session = await get_structure_session(db, user["_id"], session_oid)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
 
 
 @app.post("/scheduled-trades", response_model=ScheduledTradeOut)
