@@ -14,6 +14,9 @@ from .scheduled_trade_levels import PRICE_EPSILON, MIN_TARGET_R, as_float, resol
 STRUCTURE_TIMEFRAMES = frozenset({"H4", "H1", "M15"})
 SESSION_COLLECTION = "structure_swing_sessions"
 SOURCE_UNMITIGATED_SWINGS = "unmitigated_swings"
+MERGE_PCT = 0.01
+LOOKBACK_START = 500
+LOOKBACK_MAX = 5000
 
 
 def normalize_structure_timeframe(value: str) -> str:
@@ -39,6 +42,44 @@ def _level_row(price: float, time_value: Any = None, index: Any = None, status: 
         "index": int(index) if index is not None else None,
         "status": status,
     }
+
+
+def _within_pct(a: float, b: float, pct: float = MERGE_PCT) -> bool:
+    base = max(abs(a), abs(b), PRICE_EPSILON)
+    return abs(a - b) / base <= pct + PRICE_EPSILON
+
+
+def merge_levels_within_pct(
+    levels: Sequence[dict[str, Any]],
+    *,
+    pct: float = MERGE_PCT,
+) -> list[dict[str, Any]]:
+    """Cluster same-kind levels within ``pct``; keep extreme price per cluster."""
+    highs = [item for item in levels if item.get("kind") == "high" and not item.get("mitigated")]
+    lows = [item for item in levels if item.get("kind") == "low" and not item.get("mitigated")]
+
+    def _merge(side_levels: list[dict[str, Any]], *, prefer_high: bool) -> list[dict[str, Any]]:
+        remaining = sorted(side_levels, key=lambda item: as_float(item.get("price")), reverse=prefer_high)
+        merged: list[dict[str, Any]] = []
+        while remaining:
+            seed = remaining.pop(0)
+            seed_price = as_float(seed.get("price"))
+            cluster = [seed]
+            kept: list[dict[str, Any]] = []
+            for candidate in remaining:
+                if _within_pct(seed_price, as_float(candidate.get("price")), pct):
+                    cluster.append(candidate)
+                else:
+                    kept.append(candidate)
+            remaining = kept
+            if prefer_high:
+                best = max(cluster, key=lambda item: as_float(item.get("price")))
+            else:
+                best = min(cluster, key=lambda item: as_float(item.get("price")))
+            merged.append(best)
+        return merged
+
+    return _merge(highs, prefer_high=True) + _merge(lows, prefer_high=False)
 
 
 def slice_highs_and_lows(
@@ -85,6 +126,17 @@ def slice_highs_and_lows(
     highs.sort(key=lambda item: item["price"], reverse=True)
     lows.sort(key=lambda item: item["price"], reverse=True)
     return highs, lows
+
+
+def _lookback_limits() -> list[int]:
+    limits: list[int] = []
+    current = LOOKBACK_START
+    while current <= LOOKBACK_MAX:
+        limits.append(current)
+        if current >= LOOKBACK_MAX:
+            break
+        current = min(LOOKBACK_MAX, current * 2)
+    return limits
 
 
 def target_4r_price(side: str, entry: float, stop_loss: float) -> Optional[float]:
@@ -181,25 +233,46 @@ async def analyze_unmitigated_swings(
     mid_price: Optional[float],
 ) -> dict[str, Any]:
     tf = normalize_structure_timeframe(timeframe)
-    payload = await get_unmitigated_levels_for_symbol(
-        db,
-        account,
-        broker_symbol,
-        tf,
-        limit=500,
-        swing_length=DEFAULT_SWING_LENGTH,
-        atr_adaptive=False,
-        use_atr_filter=False,
-        use_volume_filter=False,
-    )
-    highs, lows = slice_highs_and_lows(payload.get("levels") or [], swing_count=swing_count, mid_price=mid_price)
+    count = max(1, min(int(swing_count), 50))
+    payload: dict[str, Any] = {"levels": [], "bar_count": 0}
+    highs: list[dict[str, Any]] = []
+    lows: list[dict[str, Any]] = []
+    lookback_exhausted = False
+
+    for limit in _lookback_limits():
+        payload = await get_unmitigated_levels_for_symbol(
+            db,
+            account,
+            broker_symbol,
+            tf,
+            limit=limit,
+            swing_length=DEFAULT_SWING_LENGTH,
+            atr_adaptive=False,
+            use_atr_filter=False,
+            use_volume_filter=False,
+        )
+        merged = merge_levels_within_pct(payload.get("levels") or [], pct=MERGE_PCT)
+        highs, lows = slice_highs_and_lows(merged, swing_count=count, mid_price=mid_price)
+        bar_count = int(payload.get("bar_count") or 0)
+        if len(highs) >= count and len(lows) >= count:
+            lookback_exhausted = False
+            break
+        if bar_count < limit or limit >= LOOKBACK_MAX:
+            lookback_exhausted = True
+            break
+
+    short_highs = len(highs) < count
+    short_lows = len(lows) < count
+    lookback_exhausted = bool(lookback_exhausted or short_highs or short_lows)
+
     return {
         "symbol": broker_symbol,
         "requested_symbol": requested_symbol,
         "display_symbol": display,
         "timeframe": tf,
-        "swing_count": int(swing_count),
+        "swing_count": int(count),
         "bar_count": int(payload.get("bar_count") or 0),
+        "lookback_exhausted": lookback_exhausted,
         "mid_price": float(mid_price) if mid_price is not None else None,
         "highs": highs,
         "lows": lows,

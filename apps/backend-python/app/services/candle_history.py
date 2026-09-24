@@ -790,7 +790,7 @@ async def get_unmitigated_levels_for_symbol(
         account,
         symbol,
         timeframe,
-        limit=int(limit),
+        limit=min(int(limit), 5000),
         min_bars=max(20, 2 * int(swing_length) + 1),
         force_broker_refresh=False,
     )

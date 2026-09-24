@@ -286,10 +286,19 @@ export default function UnmitigatedSwingsPanel({
       </form>
 
       {(result || session) && (
-        <div className="grid gap-3 lg:grid-cols-2">
-          <LevelColumn title="Highs" rows={displayHighs} tone="high" />
-          <LevelColumn title="Lows" rows={displayLows} tone="low" />
-        </div>
+        <>
+          {result?.lookback_exhausted ? (
+            <p className="text-xs text-amber-700 dark:text-amber-300">
+              Only {displayHighs.length} high{displayHighs.length === 1 ? "" : "s"} / {displayLows.length} low
+              {displayLows.length === 1 ? "" : "s"} found after merging levels within 1% and expanding lookback
+              {result?.bar_count ? ` (${result.bar_count} bars)` : ""}.
+            </p>
+          ) : null}
+          <div className="grid gap-3 lg:grid-cols-2">
+            <LevelColumn title="Highs" rows={displayHighs} tone="high" />
+            <LevelColumn title="Lows" rows={displayLows} tone="low" />
+          </div>
+        </>
       )}
 
       {sessionId ? (
