@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   analyzeUnmitigatedSwings,
   executeUnmitigatedSwings,
+  getActiveUnmitigatedSwingsSession,
   getUnmitigatedSwingsSession,
 } from "../../services/structureSwings";
 
@@ -211,6 +212,34 @@ export default function UnmitigatedSwingsPanel({
       risk_amount: current.risk_amount || String(activeAccount.risk_amount || ""),
     }));
   }, [activeAccount]);
+
+  useEffect(() => {
+    if (!token || !activeAccount?.id) return undefined;
+    let cancelled = false;
+    const restore = async () => {
+      try {
+        const payload = await getActiveUnmitigatedSwingsSession(token, activeAccount.id);
+        if (cancelled) return;
+        const active = payload?.session || null;
+        if (active?.id) {
+          setSession(active);
+          setSessionId(active.id);
+          setForm((current) => ({
+            ...current,
+            symbol: active.requested_symbol || active.symbol || current.symbol,
+            timeframe: active.structure_timeframe || current.timeframe,
+            risk_amount: active.risk_amount != null ? String(active.risk_amount) : current.risk_amount,
+          }));
+        }
+      } catch {
+        /* ignore restore errors */
+      }
+    };
+    restore();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, activeAccount?.id]);
 
   useEffect(() => {
     if (!token || !sessionId) return undefined;
@@ -440,8 +469,8 @@ export default function UnmitigatedSwingsPanel({
 
       {sessionId ? (
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          Session {sessionId.slice(0, 8)}… · tracking refreshes every few seconds. Levels flip to Mitigated when taken
-          out; trade status follows the linked M1 schedule.
+          Session {sessionId.slice(0, 8)}… ({session?.status || "active"}) · progress is stored in MongoDB and restored
+          when you reopen this page. Levels flip to Mitigated when taken out; trade status follows the linked M1 schedule.
         </p>
       ) : null}
     </div>

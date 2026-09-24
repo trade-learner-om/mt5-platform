@@ -253,6 +253,7 @@ def serialize_session(doc: dict, *, schedules_by_id: Optional[dict[str, dict]] =
         "structure_timeframe": doc.get("structure_timeframe"),
         "swing_count": doc.get("swing_count"),
         "risk_amount": doc.get("risk_amount"),
+        "status": doc.get("status") or "active",
         "highs": highs,
         "lows": lows,
         "levels": levels,
@@ -367,6 +368,7 @@ async def mark_session_level_mitigated(
             continue
         if str(item.get("status") or "") != "Mitigated":
             item["status"] = "Mitigated"
+            item["mitigated_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
             changed = True
     if not changed:
         return
@@ -375,6 +377,134 @@ async def mark_session_level_mitigated(
         {"_id": session_oid},
         {"$set": {"levels": levels, "updated_at": now}},
     )
+
+
+def _level_matches_schedule(item: dict, schedule: dict) -> bool:
+    schedule_id = item.get("schedule_id")
+    if schedule_id and str(schedule_id) == str(schedule.get("_id")):
+        return True
+    price = as_float(item.get("price"))
+    structure_price = as_float(schedule.get("structure_price") or schedule.get("level"))
+    tol = max(1e-6, abs(structure_price) * 1e-8)
+    if abs(price - structure_price) > tol:
+        return False
+    kind = schedule.get("structure_kind")
+    if kind and str(item.get("kind") or "") != str(kind):
+        return False
+    return True
+
+
+async def persist_schedule_progress_to_session(db, schedule: dict) -> None:
+    """Mirror schedule/trade lifecycle onto the owning structure session level in MongoDB."""
+    if str(schedule.get("source") or "") != SOURCE_UNMITIGATED_SWINGS:
+        return
+    session_id = schedule.get("structure_session_id")
+    if not session_id:
+        return
+    try:
+        session_oid = session_id if isinstance(session_id, ObjectId) else ObjectId(str(session_id))
+    except Exception:
+        return
+    doc = await db[SESSION_COLLECTION].find_one_async({"_id": session_oid})
+    if not doc:
+        return
+    levels = list(doc.get("levels") or [])
+    changed = False
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    trade_status = str(schedule.get("status") or "")
+    for item in levels:
+        if not _level_matches_schedule(item, schedule):
+            continue
+        if not item.get("schedule_id"):
+            item["schedule_id"] = schedule.get("_id")
+        item["side"] = schedule.get("side") or item.get("side")
+        item["trade_status"] = trade_status
+        item["entry"] = schedule.get("entry")
+        item["stop_loss"] = schedule.get("stop_loss")
+        item["target"] = schedule.get("target")
+        item["quantity"] = schedule.get("quantity")
+        item["order_id"] = schedule.get("order_id")
+        item["meta_order_id"] = schedule.get("meta_order_id")
+        item["last_error"] = schedule.get("last_error")
+        item["armed_at"] = schedule.get("armed_at")
+        item["placed_at"] = schedule.get("placed_at")
+        item["filled_at"] = schedule.get("filled_at")
+        item["exited_at"] = schedule.get("exited_at")
+        item["progress_updated_at"] = now
+        if trade_status == "ARMED" and str(item.get("status") or "") != "Mitigated":
+            item["status"] = "Mitigated"
+            item["mitigated_at"] = now
+        changed = True
+    if not changed:
+        return
+
+    terminal = {
+        "TARGET_EXIT",
+        "STOP_EXIT",
+        "USER_EXIT",
+        "CANCELLED",
+        "RETRY_TARGET_EXIT",
+        "RETRY_STOP_EXIT",
+        "RETRY_USER_EXIT",
+        "RETRY_CANCELLED",
+    }
+    all_done = True
+    for item in levels:
+        if item.get("error") and not item.get("schedule_id"):
+            continue
+        trade_status = str(item.get("trade_status") or "")
+        if not item.get("schedule_id"):
+            all_done = False
+            break
+        if trade_status not in terminal:
+            all_done = False
+            break
+
+    session_status = "completed" if all_done else "active"
+    await db[SESSION_COLLECTION].update_one_async(
+        {"_id": session_oid},
+        {"$set": {"levels": levels, "updated_at": now, "status": session_status}},
+    )
+
+
+async def list_structure_sessions(
+    db,
+    user_id: ObjectId,
+    *,
+    account_id: Optional[ObjectId] = None,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    query: dict[str, Any] = {"user_id": user_id}
+    if account_id is not None:
+        query["account_id"] = account_id
+    docs = await db[SESSION_COLLECTION].find_async(query)
+    docs.sort(key=lambda item: item.get("updated_at") or item.get("created_at") or datetime.min, reverse=True)
+    docs = docs[: max(1, min(int(limit), 50))]
+    out: list[dict[str, Any]] = []
+    for doc in docs:
+        out.append(await serialize_session_enriched(db, doc))
+    return out
+
+
+async def get_active_structure_session(
+    db,
+    user_id: ObjectId,
+    account_id: ObjectId,
+) -> Optional[dict[str, Any]]:
+    docs = await db[SESSION_COLLECTION].find_async(
+        {
+            "user_id": user_id,
+            "account_id": account_id,
+            "status": {"$ne": "completed"},
+        }
+    )
+    if not docs:
+        # Fall back to most recently updated session for the account.
+        docs = await db[SESSION_COLLECTION].find_async({"user_id": user_id, "account_id": account_id})
+    if not docs:
+        return None
+    docs.sort(key=lambda item: item.get("updated_at") or item.get("created_at") or datetime.min, reverse=True)
+    return await serialize_session_enriched(db, docs[0])
 
 
 async def execute_unmitigated_swings(
@@ -413,6 +543,7 @@ async def execute_unmitigated_swings(
         "structure_timeframe": tf,
         "swing_count": len(list(highs)) + len(list(lows)),
         "risk_amount": float(risk_amount),
+        "status": "active",
         "levels": [],
         "created_at": now,
         "updated_at": now,
@@ -461,6 +592,14 @@ async def execute_unmitigated_swings(
                     "schedule_id": schedule.get("id"),
                     "structure_extreme": float(extreme) if extreme is not None else None,
                     "side": side,
+                    "trade_status": schedule.get("status") or "INITIATED",
+                    "entry": schedule.get("entry"),
+                    "stop_loss": schedule.get("stop_loss"),
+                    "target": schedule.get("target"),
+                    "quantity": schedule.get("quantity"),
+                    "order_id": schedule.get("order_id"),
+                    "last_error": schedule.get("last_error"),
+                    "progress_updated_at": now,
                 }
             )
             created.append(schedule)
@@ -474,7 +613,9 @@ async def execute_unmitigated_swings(
                     "schedule_id": None,
                     "structure_extreme": None,
                     "side": None,
+                    "trade_status": None,
                     "error": str(exc),
+                    "progress_updated_at": now,
                 }
             )
 

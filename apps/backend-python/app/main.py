@@ -147,7 +147,9 @@ from .services.scheduled_trade_runtime import scheduled_trade_manager, seed_rece
 from .services.structure_swings import (
     analyze_unmitigated_swings,
     execute_unmitigated_swings,
+    get_active_structure_session,
     get_structure_session,
+    list_structure_sessions,
 )
 from .services.master_break_backtest import simulate_master_break_backtest
 from .services.master_break_backtest_persistence import (
@@ -4565,6 +4567,42 @@ async def structure_unmitigated_swings_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return session
+
+
+@app.get("/structure/unmitigated-swings/sessions")
+async def structure_unmitigated_swings_sessions(
+    account_id: Optional[str] = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=50),
+    user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    account_oid = None
+    if account_id:
+        try:
+            account_oid = parse_object_id(account_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid account id")
+        account = await db.meta_accounts.find_one_async({"_id": account_oid, "user_id": user["_id"]})
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not found")
+    return await list_structure_sessions(db, user["_id"], account_id=account_oid, limit=limit)
+
+
+@app.get("/structure/unmitigated-swings/active")
+async def structure_unmitigated_swings_active(
+    account_id: str = Query(...),
+    user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    try:
+        account_oid = parse_object_id(account_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid account id")
+    account = await db.meta_accounts.find_one_async({"_id": account_oid, "user_id": user["_id"]})
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    session = await get_active_structure_session(db, user["_id"], account_oid)
+    return {"session": session}
 
 
 @app.post("/scheduled-trades", response_model=ScheduledTradeOut)

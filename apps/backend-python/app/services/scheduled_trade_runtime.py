@@ -588,7 +588,7 @@ class ScheduledTradeManager:
                     {"candle": candle, "level": level},
                 )
                 if str(doc.get("source") or "") == "unmitigated_swings":
-                    from .structure_swings import mark_session_level_mitigated
+                    from .structure_swings import mark_session_level_mitigated, persist_schedule_progress_to_session
 
                     await mark_session_level_mitigated(
                         db,
@@ -596,6 +596,7 @@ class ScheduledTradeManager:
                         structure_price=float(doc.get("structure_price") or level),
                         structure_kind=doc.get("structure_kind"),
                     )
+                    await persist_schedule_progress_to_session(db, doc)
             return
 
         if status == "ARMED":
@@ -847,6 +848,10 @@ class ScheduledTradeManager:
             f"Primary {placed_type} placed @ {entry} SL {stop_loss}",
             {"order_id": str(order_doc["_id"]), "order_type": placed_type, "fallback": fallback},
         )
+        if str(doc.get("source") or "") == "unmitigated_swings":
+            from .structure_swings import persist_schedule_progress_to_session
+
+            await persist_schedule_progress_to_session(db, doc)
 
     async def _place_retry_immediate(self, db, account: dict, doc: dict) -> None:
         entry = doc.get("entry")
@@ -1139,9 +1144,15 @@ class ScheduledTradeManager:
             "RETRY_CANCELLED",
         }:
             updates["exited_at"] = _utc_now()
+        if status in {"ORDER_FILLED", "RETRY_ORDER_FILLED"} and not doc.get("filled_at"):
+            updates["filled_at"] = _utc_now()
         await db[COLLECTION].update_one_async({"_id": doc["_id"]}, {"$set": updates})
         doc.update(updates)
         await self._append_event(db, doc, event_type, status, message)
+        if str(doc.get("source") or "") == "unmitigated_swings":
+            from .structure_swings import persist_schedule_progress_to_session
+
+            await persist_schedule_progress_to_session(db, doc)
 
     async def _set_error(self, db, doc: dict, message: str) -> None:
         logger.info(
@@ -1153,6 +1164,10 @@ class ScheduledTradeManager:
         await db[COLLECTION].update_one_async({"_id": doc["_id"]}, {"$set": updates})
         doc.update(updates)
         await self._append_event(db, doc, "SCHEDULE_ERROR", doc.get("status"), message)
+        if str(doc.get("source") or "") == "unmitigated_swings":
+            from .structure_swings import persist_schedule_progress_to_session
+
+            await persist_schedule_progress_to_session(db, doc)
 
     async def _append_event(self, db, doc: dict, event_type: str, status: str, message: str, payload: Optional[dict] = None) -> None:
         await db[EVENTS_COLLECTION].insert_one_async(
