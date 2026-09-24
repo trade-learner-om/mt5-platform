@@ -7699,6 +7699,7 @@ export default function App() {
                 token={token}
                 accounts={internationalAccounts}
                 activeAccountId={me?.selected_account_id || ""}
+                liveScheduledTrades={liveScheduledTrades}
                 onNotify={notify}
               />
             </main>

@@ -42,7 +42,7 @@ Live ExecCandle rolls use **bid** (same as Master Break / MT5 charts), not mid. 
 
 Root sidebar → **Scheduled Trade** (`ScheduledTradePanel`): create form (Retryable order default **off**) + lifecycle list. Page id: `scheduled-trade`. Notes prefer `last_error` when set.
 
-**Unmitigated Swings** (`unmitigated-swings`) can batch-create schedules with `source=unmitigated_swings`, always `retryable_order=false`, execution TF **M1**. On level break the structure session marks that high/low **Mitigated**. At place time, TP is the farther of 4R vs the prior structure-TF candle extreme (BUY high / SELL low). Routes: `/structure/unmitigated-swings*`.
+**Unmitigated Swings** (`unmitigated-swings`) can batch-create schedules with `source=unmitigated_swings`, always `retryable_order=false`, execution TF **M1**. On level break the structure session marks that high/low **Mitigated**. At place time, TP is the farther of 4R vs the prior structure-TF candle extreme (BUY high / SELL low). Routes: `/structure/unmitigated-swings*`. Session payloads include per-level `trade_status` / entry / SL for the on-page automation tracker.
 
 ## Implementation
 

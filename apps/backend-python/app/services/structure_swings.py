@@ -189,17 +189,57 @@ def structure_extreme_for_side(side: str, candle: Optional[dict[str, Any]]) -> O
     return as_float(candle.get("high"))
 
 
-def serialize_session(doc: dict) -> dict[str, Any]:
+def serialize_session(doc: dict, *, schedules_by_id: Optional[dict[str, dict]] = None) -> dict[str, Any]:
+    schedules_by_id = schedules_by_id or {}
     levels = []
     for item in doc.get("levels") or []:
+        schedule_id = str(item["schedule_id"]) if item.get("schedule_id") else None
+        schedule = schedules_by_id.get(schedule_id or "") if schedule_id else None
+        level_status = item.get("status") or "Active"
+        trade_status = None
+        entry = None
+        stop_loss = None
+        quantity = None
+        order_id = None
+        last_error = None
+        placed_at = None
+        filled_at = None
+        exited_at = None
+        target = None
+        if schedule:
+            trade_status = schedule.get("status")
+            entry = schedule.get("entry")
+            stop_loss = schedule.get("stop_loss")
+            quantity = schedule.get("quantity")
+            order_id = str(schedule["order_id"]) if schedule.get("order_id") else None
+            last_error = schedule.get("last_error")
+            placed_at = _iso(schedule.get("placed_at"))
+            filled_at = _iso(schedule.get("filled_at"))
+            exited_at = _iso(schedule.get("exited_at"))
+            target = schedule.get("target")
+            # Prefer schedule side if present
+            side = schedule.get("side") or item.get("side")
+        else:
+            side = item.get("side")
         levels.append(
             {
                 "kind": item.get("kind"),
                 "price": item.get("price"),
-                "status": item.get("status") or "Active",
-                "schedule_id": str(item["schedule_id"]) if item.get("schedule_id") else None,
+                "status": level_status,
+                "schedule_id": schedule_id,
                 "structure_extreme": item.get("structure_extreme"),
-                "side": item.get("side"),
+                "side": side,
+                "trade_status": trade_status,
+                "entry": entry,
+                "stop_loss": stop_loss,
+                "target": target,
+                "quantity": quantity,
+                "order_id": order_id,
+                "last_error": last_error,
+                "placed_at": placed_at,
+                "filled_at": filled_at,
+                "exited_at": exited_at,
+                "error": item.get("error"),
             }
         )
     highs = [lvl for lvl in levels if lvl.get("kind") == "high"]
@@ -219,6 +259,27 @@ def serialize_session(doc: dict) -> dict[str, Any]:
         "created_at": _iso(doc.get("created_at")),
         "updated_at": _iso(doc.get("updated_at")),
     }
+
+
+async def _load_schedules_by_id(db, schedule_ids: Sequence[Any]) -> dict[str, dict]:
+    oids: list[ObjectId] = []
+    for value in schedule_ids:
+        if not value:
+            continue
+        try:
+            oids.append(value if isinstance(value, ObjectId) else ObjectId(str(value)))
+        except Exception:
+            continue
+    if not oids:
+        return {}
+    docs = await db["scheduled_trades"].find_async({"_id": {"$in": oids}})
+    return {str(doc.get("_id")): doc for doc in docs}
+
+
+async def serialize_session_enriched(db, doc: dict) -> dict[str, Any]:
+    schedule_ids = [item.get("schedule_id") for item in (doc.get("levels") or [])]
+    schedules = await _load_schedules_by_id(db, schedule_ids)
+    return serialize_session(doc, schedules_by_id=schedules)
 
 
 async def analyze_unmitigated_swings(
@@ -428,7 +489,7 @@ async def execute_unmitigated_swings(
     )
     session_doc["levels"] = levels_out
     return {
-        "session": serialize_session(session_doc),
+        "session": await serialize_session_enriched(db, session_doc),
         "created": created,
         "errors": errors,
     }
@@ -438,4 +499,4 @@ async def get_structure_session(db, user_id: ObjectId, session_id: ObjectId) -> 
     doc = await db[SESSION_COLLECTION].find_one_async({"_id": session_id, "user_id": user_id})
     if not doc:
         return None
-    return serialize_session(doc)
+    return await serialize_session_enriched(db, doc)
