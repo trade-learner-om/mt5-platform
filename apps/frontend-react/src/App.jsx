@@ -3926,6 +3926,7 @@ function Tracker({ rows, onOpenClose, onEditOrder, onFullClose, onCancelOrder, a
             <th className="px-2 py-2">Target</th>
             <th className="px-2 py-2">Qty</th>
             <th className="px-2 py-2">Risk</th>
+            <th className="px-2 py-2">RRR</th>
             <th className="px-2 py-2">Send after</th>
             <th className="px-2 py-2 text-right">Action</th>
           </tr>
@@ -3950,6 +3951,9 @@ function Tracker({ rows, onOpenClose, onEditOrder, onFullClose, onCancelOrder, a
               <td className="px-2 py-2 text-slate-700 dark:text-slate-300">{row.target != null ? formatPrice(row.target) : "—"}</td>
               <td className="px-2 py-2 text-slate-700 dark:text-slate-300">{formatQty(row.quantity)}</td>
               <td className="px-2 py-2 text-slate-700 dark:text-slate-300">{row.risk_amount != null ? formatPrice(row.risk_amount) : "—"}</td>
+              <td className="px-2 py-2 font-semibold text-indigo-700 dark:text-indigo-300">
+                {row.rr_ratio != null && row.rr_ratio !== "" ? `${row.rr_ratio}R` : "—"}
+              </td>
               <td className="px-2 py-2 text-xs text-slate-600 dark:text-slate-400">{row.place_after ? formatNotificationTimestamp(row.place_after) : "Mon 04:30 IST"}</td>
               <td className="px-2 py-2 text-right">
                 <div className="flex justify-end gap-2">
