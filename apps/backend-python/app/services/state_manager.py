@@ -50,7 +50,7 @@ class LiveStateHub:
                 "user_id": user_oid,
                 "dry_run": {"$ne": True},
                 "$or": [
-                    {"status": {"$in": ["WAITING_TRIGGER", "PLACEMENT_PENDING", "PENDING", "FILLED", "POSITION_OPEN", "PARTIALLY_CLOSED"]}},
+                    {"status": {"$in": ["WAITING_TRIGGER", "PLACEMENT_PENDING", "PENDING", "DEFERRED_MARKET_OPEN", "FILLED", "POSITION_OPEN", "PARTIALLY_CLOSED"]}},
                     {
                         "created_at": {
                             "$gte": today_start_utc,
@@ -124,6 +124,7 @@ class LiveStateHub:
                     "order_type": o.get("order_type"),
                     "side": o.get("side"),
                     "quantity": o.get("quantity"),
+                    "risk_amount": o.get("risk_amount"),
                     "entry": o.get("entry"),
                     "stop_loss": o.get("stop_loss"),
                     "target": o.get("target"),
@@ -134,6 +135,7 @@ class LiveStateHub:
                     "unrealized_pl": o.get("unrealized_pl"),
                     "failure_reason": o.get("failure_reason"),
                     "placement_fallback_reason": o.get("placement_fallback_reason"),
+                    "place_after": _iso_timestamp(o.get("place_after")),
                     "comment": o.get("comment"),
                     "manual_context": o.get("manual_context") or {},
                     "broker_info": o.get("broker_info"),

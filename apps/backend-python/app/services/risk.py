@@ -283,6 +283,58 @@ def calc_quantity_from_live_pip_value(
     return normalize_volume_to_risk(lots, volume_step=volume_step, volume_min=volume_min, volume_max=volume_max)
 
 
+def calc_risk_amount_from_quantity(
+    symbol: str,
+    quantity: float,
+    entry: float,
+    stop_loss: float,
+    *,
+    pip_value_per_standard_lot: Optional[float] = None,
+    tick_size: Optional[float] = None,
+    tick_value: Optional[float] = None,
+    contract_size: Optional[float] = None,
+    account_currency: str = "USD",
+    quote_to_account_rate: Optional[float] = None,
+) -> float:
+    """Inverse of quantity sizing: risk ≈ lots × SL distance × value-per-lot."""
+    lots = float(quantity or 0.0)
+    stop_distance = abs(float(entry or 0.0) - float(stop_loss or 0.0))
+    if lots <= 0 or stop_distance <= 0:
+        return 0.0
+    if symbol_uses_pips(symbol):
+        sl_pips = calc_sl_pips(symbol, entry, stop_loss)
+        if sl_pips <= 0:
+            return 0.0
+        pip_value = float(pip_value_per_standard_lot or 0.0)
+        if pip_value <= 0:
+            pip_value = infer_pip_value_per_standard_lot(
+                symbol,
+                entry,
+                account_currency=account_currency,
+                quote_to_account_rate=quote_to_account_rate,
+                contract_size=contract_size,
+            )
+        if pip_value <= 0:
+            return 0.0
+        return round(lots * sl_pips * pip_value, 2)
+    effective_tick_size = float(tick_size or 0.0)
+    effective_tick_value = float(tick_value or 0.0)
+    price_value_per_standard_lot = 0.0
+    if effective_tick_size > 0 and effective_tick_value > 0:
+        price_value_per_standard_lot = effective_tick_value / effective_tick_size
+    if price_value_per_standard_lot <= 0:
+        price_value_per_standard_lot = infer_price_value_per_standard_lot(
+            symbol,
+            entry,
+            account_currency=account_currency,
+            quote_to_account_rate=quote_to_account_rate,
+            contract_size=contract_size,
+        )
+    if price_value_per_standard_lot <= 0:
+        return 0.0
+    return round(lots * stop_distance * price_value_per_standard_lot, 2)
+
+
 def normalize_volume_to_risk(
     raw_lots: float,
     volume_step: float = 0.01,

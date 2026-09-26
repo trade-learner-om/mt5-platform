@@ -56,7 +56,15 @@ function formatQty(value) {
 }
 
 function isEditablePendingOrder(status) {
-  return ["PENDING", "PLACEMENT_PENDING", "WAITING_TRIGGER"].includes(String(status || "").toUpperCase());
+  return ["PENDING", "PLACEMENT_PENDING", "WAITING_TRIGGER", "DEFERRED_MARKET_OPEN"].includes(String(status || "").toUpperCase());
+}
+
+function isDeferredMarketOpenOrder(row) {
+  return String(row?.status || "").toUpperCase() === "DEFERRED_MARKET_OPEN";
+}
+
+function isMarketClosedOfferOrder(row) {
+  return Boolean(row?.manual_context?.market_closed_offer) && String(row?.status || "").toUpperCase() === "PLACEMENT_PENDING";
 }
 
 function formatNotificationTimestamp(value) {
@@ -272,10 +280,12 @@ const STATUS_LABELS = {
   PLACEMENT_PENDING: "Placement Pending",
   WAITING_TRIGGER: "Waiting Trigger",
   PENDING: "Pending",
+  DEFERRED_MARKET_OPEN: "Pending (Mon 4:30 IST)",
   FILLED: "Filled",
   PARTIALLY_CLOSED: "Partially Closed",
   CLOSED: "Closed",
   CANCELLED: "Cancelled",
+  FAILED: "Failed",
   LONG_SETUP_ACTIVE: "Long Setup Active",
   SHORT_SETUP_ACTIVE: "Short Setup Active",
   WAITING: "Waiting",
@@ -608,6 +618,7 @@ function notificationToastType(notification) {
 function summarizePlacement(result) {
   if (!result) return "Order submission finished.";
   const waiting = (result.results || []).filter((item) => String(item.status || "").toUpperCase() === "WAITING_TRIGGER").length;
+  const marketClosed = (result.results || []).filter((item) => item.market_closed).length;
   if (result.success_count && result.failed_count) {
     return waiting
       ? `Armed/placed on ${result.success_count} account(s). ${result.failed_count} account(s) failed.`
@@ -619,6 +630,9 @@ function summarizePlacement(result) {
       : waiting
         ? `Submitted on ${result.success_count} account(s) (${waiting} waiting for trigger).`
         : `Placed successfully on ${result.success_count} account(s).`;
+  }
+  if (marketClosed && !result.failed_count) {
+    return null;
   }
   return `Order placement failed on ${result.failed_count || 0} account(s).`;
 }
@@ -661,7 +675,7 @@ function statusTone(status) {
   const upper = String(status || "").toUpperCase();
   if (upper === "FAILED") return "bg-rose-100 text-rose-700";
   if (["FILLED", "POSITION_OPEN", "PARTIALLY_CLOSED", "CLOSED"].includes(upper)) return "bg-emerald-100 text-emerald-700";
-  if (["PLACEMENT_PENDING", "PENDING", "WAITING_TRIGGER"].includes(upper)) return "bg-amber-100 text-amber-700";
+  if (["PLACEMENT_PENDING", "PENDING", "WAITING_TRIGGER", "DEFERRED_MARKET_OPEN"].includes(upper)) return "bg-amber-100 text-amber-700";
   return "bg-slate-100 text-slate-700";
 }
 
@@ -1857,6 +1871,8 @@ function OrderScreen({
   const [marketPrice, setMarketPrice] = useState(null);
   const [marketDirection, setMarketDirection] = useState("flat");
   const [placingOrder, setPlacingOrder] = useState(false);
+  const [marketClosedOffer, setMarketClosedOffer] = useState(null);
+  const [deferBusy, setDeferBusy] = useState(false);
   const [touchedFields, setTouchedFields] = useState({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [selectedTargetIds, setSelectedTargetIds] = useState([]);
@@ -2235,8 +2251,15 @@ function OrderScreen({
             trigger_price: isConditionalSl ? triggerPrice : null,
             retryable_order: (effectiveOrderType === "LIMIT" || effectiveOrderType === "SL") ? form.retryable_order : false,
           }, token);
-      onNotify(result.failed_count > 0 ? "error" : "success", summarizePlacement(result));
-      if (result.failed_count === 0) {
+      const closedOffers = (result.results || []).filter((item) => item.market_closed && item.order_id);
+      if (closedOffers.length) {
+        setMarketClosedOffer({ results: closedOffers, placement: result });
+      }
+      const summary = summarizePlacement(result);
+      if (summary) {
+        onNotify(result.failed_count > 0 ? "error" : "success", summary);
+      }
+      if (result.failed_count === 0 && !closedOffers.length) {
         const defaults = me?.ui_settings?.order_defaults || {};
         setForm((current) => ({
           ...current,
@@ -2257,6 +2280,56 @@ function OrderScreen({
       onNotify("error", err.message);
     } finally {
       setPlacingOrder(false);
+    }
+  };
+
+  const confirmMarketClosedDefer = async () => {
+    if (!marketClosedOffer?.results?.length) return;
+    setDeferBusy(true);
+    try {
+      for (const item of marketClosedOffer.results) {
+        await api(`/orders/${item.order_id}/defer-market-open`, "POST", undefined, token);
+      }
+      onNotify("success", `Pending order saved. It will be sent to the broker after Monday 04:30 IST.`);
+      setMarketClosedOffer(null);
+      const defaults = me?.ui_settings?.order_defaults || {};
+      setForm((current) => ({
+        ...current,
+        entry: "",
+        stop_loss: "",
+        target: "",
+        cancel_at: "",
+        trigger_price: "",
+        conditional_order: false,
+        comment: "",
+        retryable_order: defaults.retryable_order !== false,
+        automatic_trade_management: defaults.automatic_trade_management !== false,
+      }));
+      setSubmitAttempted(false);
+      setTouchedFields({});
+    } catch (err) {
+      onNotify("error", err.message || "Could not save pending order.");
+    } finally {
+      setDeferBusy(false);
+    }
+  };
+
+  const declineMarketClosedDefer = async () => {
+    if (!marketClosedOffer?.results?.length) {
+      setMarketClosedOffer(null);
+      return;
+    }
+    setDeferBusy(true);
+    try {
+      for (const item of marketClosedOffer.results) {
+        await api(`/orders/${item.order_id}/decline-defer`, "POST", undefined, token);
+      }
+      onNotify("info", "Pending order not saved.");
+      setMarketClosedOffer(null);
+    } catch (err) {
+      onNotify("error", err.message || "Could not decline pending order.");
+    } finally {
+      setDeferBusy(false);
     }
   };
 
@@ -2853,6 +2926,37 @@ function OrderScreen({
           </div>
         </div>
       )}
+      {marketClosedOffer ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <h3 className="text-lg font-bold text-slate-900">Market is closed</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              Do you want to place a pending order? It will be saved locally and sent to the broker after Monday 04:30 IST.
+            </p>
+            <p className="mt-2 text-xs text-slate-500">
+              {marketClosedOffer.results.length} account{marketClosedOffer.results.length === 1 ? "" : "s"} affected.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={deferBusy}
+                onClick={declineMarketClosedDefer}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+              >
+                No Thanks
+              </button>
+              <button
+                type="button"
+                disabled={deferBusy}
+                onClick={confirmMarketClosedDefer}
+                className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {deferBusy ? "Saving…" : "OK"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -3108,7 +3212,16 @@ function Tracker({ rows, onOpenClose, onEditOrder, onFullClose, onCancelOrder, a
     [activeRows]
   );
   const pendingRows = useMemo(
-    () => activeRows.filter((row) => ["PENDING", "PLACEMENT_PENDING", "WAITING_TRIGGER"].includes(String(row.status || "").toUpperCase())),
+    () =>
+      activeRows.filter((row) => {
+        const status = String(row.status || "").toUpperCase();
+        if (status === "DEFERRED_MARKET_OPEN" || isMarketClosedOfferOrder(row)) return false;
+        return ["PENDING", "PLACEMENT_PENDING", "WAITING_TRIGGER"].includes(status);
+      }),
+    [activeRows]
+  );
+  const deferredPendingOrders = useMemo(
+    () => activeRows.filter((row) => isDeferredMarketOpenOrder(row)),
     [activeRows]
   );
   const isConditionalWaitingOrder = (row) => {
@@ -3800,8 +3913,101 @@ function Tracker({ rows, onOpenClose, onEditOrder, onFullClose, onCancelOrder, a
     );
   };
 
+  const renderDeferredPendingOrdersRowsTable = (items) => (
+    <div className="overflow-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-amber-50/80 dark:bg-amber-950/40">
+          <tr className="text-left text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            <th className="px-2 py-2">Symbol</th>
+            <th className="px-2 py-2">Side</th>
+            <th className="px-2 py-2">Type</th>
+            <th className="px-2 py-2">Entry</th>
+            <th className="px-2 py-2">SL</th>
+            <th className="px-2 py-2">Target</th>
+            <th className="px-2 py-2">Qty</th>
+            <th className="px-2 py-2">Risk</th>
+            <th className="px-2 py-2">Send after</th>
+            <th className="px-2 py-2 text-right">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((row) => (
+            <tr key={row.id} className="border-b border-amber-100 hover:bg-amber-50/60 dark:border-amber-900/40 dark:hover:bg-amber-950/30">
+              <td className="px-2 py-2 font-semibold text-slate-900 dark:text-slate-100">
+                <span className="inline-flex items-center gap-2">
+                  <SymbolIcon symbol={row.symbol} size="sm" />
+                  {row.symbol}
+                </span>
+              </td>
+              <td className="px-2 py-2">
+                <span className={`rounded-full px-2 py-1 text-xs font-semibold ${String(row.side || "").toUpperCase() === "BUY" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>
+                  {String(row.side || "-").toUpperCase()}
+                </span>
+              </td>
+              <td className="px-2 py-2 text-slate-700 dark:text-slate-300">{orderTypeLabel(row)}</td>
+              <td className="px-2 py-2 text-slate-700 dark:text-slate-300">{formatPrice(row.entry)}</td>
+              <td className="px-2 py-2 text-slate-700 dark:text-slate-300">{formatPrice(row.stop_loss)}</td>
+              <td className="px-2 py-2 text-slate-700 dark:text-slate-300">{row.target != null ? formatPrice(row.target) : "—"}</td>
+              <td className="px-2 py-2 text-slate-700 dark:text-slate-300">{formatQty(row.quantity)}</td>
+              <td className="px-2 py-2 text-slate-700 dark:text-slate-300">{row.risk_amount != null ? formatPrice(row.risk_amount) : "—"}</td>
+              <td className="px-2 py-2 text-xs text-slate-600 dark:text-slate-400">{row.place_after ? formatNotificationTimestamp(row.place_after) : "Mon 04:30 IST"}</td>
+              <td className="px-2 py-2 text-right">
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={() => onEditOrder(row)}
+                    disabled={actionLoadingId === row.id}
+                    className="rounded-lg bg-indigo-100 px-3 py-1 text-xs font-semibold text-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => onCancelOrder(row)}
+                    disabled={actionLoadingId === row.id}
+                    className="rounded-lg bg-rose-100 px-3 py-1 text-xs font-semibold text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {actionLoadingId === row.id ? "Cancelling..." : "Cancel"}
+                  </button>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  const renderDeferredPendingOrdersGroup = (sectionItems) => {
+    const groups = groupRowsByBroker(sectionItems);
+    return (
+      <div className="space-y-5">
+        {groups.map(([key, label, items]) => (
+          <div key={key}>
+            {renderBrokerGroupHeader(label, items.length)}
+            {renderDeferredPendingOrdersRowsTable(items)}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   const renderOrdersSection = () => (
     <div className="space-y-4">
+      {deferredPendingOrders.length > 0 ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-4 dark:border-amber-900/50 dark:bg-amber-950/20">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h4 className="text-sm font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-300">Pending Orders</h4>
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                Saved locally while the market is closed. Sent to the broker after Monday 04:30 IST. Editable until then.
+              </p>
+            </div>
+            <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900 dark:bg-amber-900/60 dark:text-amber-100">
+              {deferredPendingOrders.length}
+            </span>
+          </div>
+          {renderDeferredPendingOrdersGroup(deferredPendingOrders)}
+        </div>
+      ) : null}
       <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-4 dark:border-indigo-900/50 dark:bg-indigo-950/20">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -6456,16 +6662,20 @@ function AdminConsolePage({ token, me, onNotify, adminFlowRuns }) {
   );
 }
 
-function EditPendingOrderModal({ order, onClose, onSubmit }) {
+function EditPendingOrderModal({ order, onClose, onSubmit, token }) {
   const symbol = order?.symbol || "";
   const side = String(order?.side || "").toUpperCase();
   const orderType = String(order?.order_type || order?.orderType || "SL").toUpperCase();
+  const isDeferred = isDeferredMarketOpenOrder(order);
   const [entry, setEntry] = useState(order?.entry != null ? String(order.entry) : "");
   const [stopLoss, setStopLoss] = useState(order?.stop_loss != null ? String(order.stop_loss) : "");
   const [target, setTarget] = useState(order?.target != null && order?.target !== "" ? String(order.target) : "");
   const [quantity, setQuantity] = useState(order?.quantity != null ? formatQty(order.quantity) : "");
+  const [riskAmount, setRiskAmount] = useState(order?.risk_amount != null ? String(order.risk_amount) : "");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const lastEdited = useRef(isDeferred ? "risk" : "qty");
 
   useEffect(() => {
     if (!order) {
@@ -6473,6 +6683,7 @@ function EditPendingOrderModal({ order, onClose, onSubmit }) {
       setStopLoss("");
       setTarget("");
       setQuantity("");
+      setRiskAmount("");
       setError("");
       setSubmitting(false);
       return;
@@ -6481,9 +6692,63 @@ function EditPendingOrderModal({ order, onClose, onSubmit }) {
     setStopLoss(order.stop_loss != null ? String(order.stop_loss) : "");
     setTarget(order.target != null && order.target !== "" ? String(order.target) : "");
     setQuantity(order.quantity != null ? formatQty(order.quantity) : "");
+    setRiskAmount(order.risk_amount != null ? String(order.risk_amount) : "");
     setError("");
     setSubmitting(false);
+    lastEdited.current = isDeferredMarketOpenOrder(order) ? "risk" : "qty";
   }, [order]);
+
+  useEffect(() => {
+    if (!isDeferred || !order?.account_id || !token) return undefined;
+    const numericEntry = Number(entry);
+    const numericStop = Number(stopLoss);
+    const numericRisk = Number(riskAmount);
+    const numericQty = Number(quantity);
+    if (!Number.isFinite(numericEntry) || numericEntry <= 0 || !Number.isFinite(numericStop) || numericStop <= 0) {
+      return undefined;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      if (lastEdited.current === "risk") {
+        if (!Number.isFinite(numericRisk) || numericRisk <= 0) return;
+        setPreviewBusy(true);
+        try {
+          const preview = await api(
+            "/risk-preview/multi",
+            "POST",
+            {
+              symbol,
+              side,
+              order_type: orderType,
+              entry: numericEntry,
+              stop_loss: numericStop,
+              target: target.trim() === "" ? null : Number(target),
+              targets: [{ account_db_id: order.account_id, risk_amount: numericRisk }],
+            },
+            token
+          );
+          const qty = preview?.targets?.[0]?.quantity;
+          if (!cancelled && qty != null) setQuantity(formatQty(qty));
+        } catch {
+          /* keep manual values */
+        } finally {
+          if (!cancelled) setPreviewBusy(false);
+        }
+      } else if (lastEdited.current === "qty" || lastEdited.current === "levels") {
+        if (!Number.isFinite(numericQty) || numericQty <= 0) return;
+        // Approximate risk from prior risk/qty ratio when SL distance changes proportionally via modify on save.
+        // Live risk refresh: scale from last known ratio when only qty changes; otherwise wait for save.
+        if (lastEdited.current === "qty" && Number(order.quantity) > 0 && order.risk_amount != null) {
+          const scaled = (numericQty / Number(order.quantity)) * Number(order.risk_amount);
+          if (!cancelled && Number.isFinite(scaled)) setRiskAmount(String(Math.round(scaled * 100) / 100));
+        }
+      }
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [entry, stopLoss, riskAmount, quantity, isDeferred, order, symbol, side, orderType, target, token]);
 
   if (!order) return null;
 
@@ -6492,6 +6757,7 @@ function EditPendingOrderModal({ order, onClose, onSubmit }) {
     const numericStop = Number(stopLoss);
     const numericTarget = target.trim() === "" ? null : Number(target);
     const numericQuantity = Number(quantity);
+    const numericRisk = Number(riskAmount);
     if (!Number.isFinite(numericEntry) || numericEntry <= 0) {
       setError("Enter a valid entry price.");
       return;
@@ -6504,19 +6770,37 @@ function EditPendingOrderModal({ order, onClose, onSubmit }) {
       setError("Enter a valid target or leave it blank.");
       return;
     }
-    if (!Number.isFinite(numericQuantity) || numericQuantity <= 0) {
+    if (isDeferred) {
+      if (lastEdited.current === "risk") {
+        if (!Number.isFinite(numericRisk) || numericRisk <= 0) {
+          setError("Enter a valid risk amount.");
+          return;
+        }
+      } else if (!Number.isFinite(numericQuantity) || numericQuantity <= 0) {
+        setError("Enter a valid quantity.");
+        return;
+      }
+    } else if (!Number.isFinite(numericQuantity) || numericQuantity <= 0) {
       setError("Enter a valid quantity.");
       return;
     }
     setSubmitting(true);
     setError("");
     try {
-      await onSubmit(order.id, {
+      const payload = {
         entry: numericEntry,
         stop_loss: numericStop,
         target: numericTarget,
-        quantity: numericQuantity,
-      });
+      };
+      if (isDeferred && lastEdited.current === "risk") {
+        payload.risk_amount = numericRisk;
+      } else {
+        payload.quantity = numericQuantity;
+        if (isDeferred && Number.isFinite(numericRisk) && numericRisk > 0) {
+          // quantity path; backend recomputes risk
+        }
+      }
+      await onSubmit(order.id, payload);
     } catch (err) {
       setError(err?.message || "Unable to update the order.");
       setSubmitting(false);
@@ -6528,7 +6812,7 @@ function EditPendingOrderModal({ order, onClose, onSubmit }) {
       <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
-            <h3 className="text-lg font-bold text-slate-900">Edit Pending Order</h3>
+            <h3 className="text-lg font-bold text-slate-900">{isDeferred ? "Edit Deferred Pending Order" : "Edit Pending Order"}</h3>
             <p className="mt-1 text-sm text-slate-600">
               {symbol ? `${symbol} · ${side} · ${orderType}` : "Pending order"}
             </p>
@@ -6538,24 +6822,71 @@ function EditPendingOrderModal({ order, onClose, onSubmit }) {
           </button>
         </div>
         <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-          Changing quantity cancels the broker order and places a new one. Entry, stop loss, and target updates are sent to the broker when quantity stays the same.
+          {isDeferred
+            ? "Changes stay local until Monday 04:30 IST when the order is sent to the broker. Updating risk recalculates quantity; updating quantity recalculates risk."
+            : "Changing quantity cancels the broker order and places a new one. Entry, stop loss, and target updates are sent to the broker when quantity stays the same."}
         </p>
         <div className="space-y-3">
           <label className="block space-y-1 text-sm">
             <span className="font-medium text-slate-600">Entry</span>
-            <input value={entry} onChange={(e) => setEntry(e.target.value)} type="number" step="any" className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-indigo-400" disabled={orderType === "MARKET"} />
+            <input
+              value={entry}
+              onChange={(e) => {
+                lastEdited.current = "levels";
+                setEntry(e.target.value);
+              }}
+              type="number"
+              step="any"
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-indigo-400"
+              disabled={orderType === "MARKET"}
+            />
           </label>
           <label className="block space-y-1 text-sm">
             <span className="font-medium text-slate-600">Stop loss</span>
-            <input value={stopLoss} onChange={(e) => setStopLoss(e.target.value)} type="number" step="any" className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-indigo-400" />
+            <input
+              value={stopLoss}
+              onChange={(e) => {
+                lastEdited.current = "levels";
+                setStopLoss(e.target.value);
+              }}
+              type="number"
+              step="any"
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-indigo-400"
+            />
           </label>
           <label className="block space-y-1 text-sm">
             <span className="font-medium text-slate-600">Target (optional)</span>
             <input value={target} onChange={(e) => setTarget(e.target.value)} type="number" step="any" className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-indigo-400" />
           </label>
+          {isDeferred ? (
+            <label className="block space-y-1 text-sm">
+              <span className="font-medium text-slate-600">Risk amount {previewBusy ? "(updating…)" : ""}</span>
+              <input
+                value={riskAmount}
+                onChange={(e) => {
+                  lastEdited.current = "risk";
+                  setRiskAmount(e.target.value);
+                }}
+                type="number"
+                step="any"
+                min="0"
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-indigo-400"
+              />
+            </label>
+          ) : null}
           <label className="block space-y-1 text-sm">
             <span className="font-medium text-slate-600">Quantity</span>
-            <input value={quantity} onChange={(e) => setQuantity(e.target.value)} type="number" step="0.01" min="0.01" className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-indigo-400" />
+            <input
+              value={quantity}
+              onChange={(e) => {
+                lastEdited.current = "qty";
+                setQuantity(e.target.value);
+              }}
+              type="number"
+              step="0.01"
+              min="0.01"
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none focus:border-indigo-400"
+            />
           </label>
         </div>
         {error ? <p className="mt-3 text-sm font-semibold text-rose-600">{error}</p> : null}
@@ -7762,7 +8093,7 @@ export default function App() {
         onClose={() => setCloseOrder(null)}
         onSubmit={onClosePosition}
       />
-      <EditPendingOrderModal order={editOrder} onClose={() => setEditOrder(null)} onSubmit={onModifyPendingOrder} />
+      <EditPendingOrderModal order={editOrder} onClose={() => setEditOrder(null)} onSubmit={onModifyPendingOrder} token={token} />
     </AppShell>
   );
 }

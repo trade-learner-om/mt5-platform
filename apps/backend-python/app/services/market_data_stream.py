@@ -25,6 +25,7 @@ from .metaapi_client import (
 from .async_runtime import run_coro_in_thread, run_sync
 from .manual_order_runtime import manual_order_runtime_manager
 from .m1_candle_builder import m1_candle_builder
+from .deferred_market_open import process_due_deferred_orders
 from .risk import digits_from_symbol_spec, normalize_price_to_symbol
 from .symbol_resolver import normalize_symbol, resolve_broker_symbol
 from .master_break_runtime import master_break_manager
@@ -970,6 +971,7 @@ class MarketDataStreamManager:
                     user_id=str(user_id),
                 )
                 await run_coro_in_thread(manual_order_runtime_manager.handle_tick, session["db"], user_id, account, price, tick_time)
+                await process_due_deferred_orders(session["db"], user_id, account)
             if account:
                 await run_coro_in_thread(trade_planner_runtime_manager.handle_tick, session["db"], user_id, account_db_id, account, price)
             self._mongo_outage_until.pop(session_key, None)

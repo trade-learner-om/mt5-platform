@@ -12,6 +12,8 @@ Order endpoints live in `apps/backend-python/app/main.py`:
 - `POST /orders/{order_id}/modify`
 - `POST /orders/{order_id}/cancel`
 - `POST /orders/{order_id}/close`
+- `POST /orders/{order_id}/defer-market-open`
+- `POST /orders/{order_id}/decline-defer`
 - `GET /orders/{order_id}/events`
 - `GET /orders/history`
 
@@ -38,10 +40,20 @@ These are persisted on each order in `manual_context`:
 - `conditional_order`
 - `trigger_price`
 - `conditional_triggered`
+- `market_closed_offer` / `deferred_market_open` (weekend / market-closed defer)
 
 Runtime logic lives in `apps/backend-python/app/services/manual_order_runtime.py` and is invoked from `market_data_stream` on live ticks and after broker reconciliation.
 
 Orders linked via `scheduled_trade_id` are strategy-owned and skipped by manual retry/ATM; their lifecycle is owned by Scheduled Break Trade (`docs/skills/scheduled-break-trade.md`).
+
+### Market-closed deferred pending
+
+- If broker placement fails **only** with market closed (`retcode=10018` / `is_market_closed_error`), the API keeps the row as `PLACEMENT_PENDING` with `manual_context.market_closed_offer=true` and returns `market_closed: true` on that result (not `FAILED`).
+- Web Place Order shows a modal: save as pending (**OK**) or decline (**No Thanks**).
+- **OK** → `POST /orders/{id}/defer-market-open` → status `DEFERRED_MARKET_OPEN`, `place_after` = next Monday **04:30 Asia/Kolkata** (stored UTC). Not sent to the broker yet.
+- **No Thanks** → `POST /orders/{id}/decline-defer` → `FAILED`.
+- After `place_after`, `deferred_market_open.process_due_deferred_orders` (primary live tick path) places via `place_pending_order_with_limit_fallback`. Still market-closed → leave deferred and retry; other errors → `FAILED`.
+- Orders tab **Pending Orders** section lists `DEFERRED_MARKET_OPEN` only when any exist. Local modify/cancel allowed until broker placement; risk↔quantity are bidirectional on modify.
 
 ### Conditional SL order
 

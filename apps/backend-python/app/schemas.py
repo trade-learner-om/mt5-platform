@@ -186,7 +186,8 @@ class OrderModifyIn(BaseModel):
     entry: float
     stop_loss: float
     target: Optional[float] = None
-    quantity: float
+    quantity: Optional[float] = None
+    risk_amount: Optional[float] = None
     trigger_price: Optional[float] = None
 
 
@@ -517,6 +518,7 @@ class OrderPlacementResultOut(BaseModel):
     status: str
     quantity: Optional[float] = None
     failure_reason: Optional[str] = None
+    market_closed: bool = False
 
 
 class OrderPlacementOut(BaseModel):

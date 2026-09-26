@@ -104,6 +104,7 @@ from .services.async_runtime import run_coro_in_thread, run_sync
 from .services.risk import (
     calc_quantity,
     calc_quantity_from_live_pip_value,
+    calc_risk_amount_from_quantity,
     calc_rr,
     calc_sl_pips,
     digits_from_symbol_spec,
@@ -113,10 +114,14 @@ from .services.risk import (
 )
 from .services.order_logging import append_order_log_prices, merge_order_log_payload
 from .services.order_placement import (
+    DEFERRED_MARKET_OPEN_STATUS,
+    is_market_closed_error,
+    next_monday_0430_ist,
     order_placement_fallback_fields,
     place_pending_order_with_limit_fallback,
     sl_limit_fallback_event_message,
 )
+from .services.deferred_market_open import process_due_deferred_orders
 from .services.symbol_resolver import (
     detect_account_symbol_aliases,
     display_symbol,
@@ -1919,6 +1924,114 @@ def _build_order_quantity(account: dict, symbol: str, entry: float, stop_loss: f
     return qty
 
 
+def _build_order_risk_amount(
+    account: dict,
+    symbol: str,
+    entry: float,
+    stop_loss: float,
+    quantity: float,
+    risk_ctx: Optional[dict] = None,
+) -> float:
+    if risk_ctx:
+        return calc_risk_amount_from_quantity(
+            symbol.upper(),
+            quantity,
+            entry,
+            stop_loss,
+            pip_value_per_standard_lot=float(risk_ctx.get("pip_value_per_standard_lot") or 0),
+            tick_size=float(risk_ctx.get("tick_size") or 0.0),
+            tick_value=float(risk_ctx.get("tick_value") or 0.0),
+            contract_size=float(risk_ctx.get("contract_size") or 0.0),
+            account_currency=str(risk_ctx.get("account_currency") or account.get("account_currency") or "USD"),
+        )
+    return calc_risk_amount_from_quantity(
+        symbol.upper(),
+        quantity,
+        entry,
+        stop_loss,
+        account_currency=str(account.get("account_currency") or "USD"),
+    )
+
+
+async def _modify_deferred_local_order(db, user, account: dict, order: dict, order_oid, data: OrderModifyIn, broker_info: dict):
+    await _validate_order_payload(
+        account,
+        order["symbol"],
+        order["order_type"],
+        order["side"],
+        data.entry,
+        data.stop_loss,
+        data.target,
+    )
+    new_entry, new_stop, new_target = await _normalize_order_prices(
+        account,
+        order["symbol"],
+        float(data.entry),
+        float(data.stop_loss),
+        data.target,
+    )
+    try:
+        risk_ctx = await metaapi_service.get_risk_context(account["api_token"], account["account_id"], order["symbol"])
+    except Exception:
+        risk_ctx = None
+
+    risk_provided = data.risk_amount is not None
+    qty_provided = data.quantity is not None
+    if risk_provided:
+        risk_amount = float(data.risk_amount)
+        if risk_amount <= 0:
+            raise HTTPException(status_code=400, detail="risk_amount must be positive")
+        new_qty = _build_order_quantity(account, order["symbol"], new_entry, new_stop, risk_amount, risk_ctx)
+        if new_qty <= 0:
+            raise HTTPException(status_code=400, detail="Risk amount is too small for broker minimum volume.")
+    elif qty_provided:
+        new_qty = float(data.quantity)
+        if new_qty <= 0:
+            raise HTTPException(status_code=400, detail="quantity must be positive")
+        risk_amount = _build_order_risk_amount(account, order["symbol"], new_entry, new_stop, new_qty, risk_ctx)
+    else:
+        new_qty = float(order.get("quantity") or 0)
+        risk_amount = _build_order_risk_amount(account, order["symbol"], new_entry, new_stop, new_qty, risk_ctx)
+
+    update_fields = {
+        "entry": new_entry,
+        "stop_loss": new_stop,
+        "target": new_target,
+        "quantity": new_qty,
+        "risk_amount": risk_amount,
+        "sl_pips": calc_sl_pips(order["symbol"], new_entry, new_stop),
+        "rr_ratio": calc_rr(order["side"], new_entry, new_stop, new_target),
+        "updated_at": datetime.utcnow(),
+        "broker_info": broker_info,
+    }
+    await db.orders.update_one_async({"_id": order_oid}, {"$set": update_fields})
+    updated = {**order, **update_fields}
+    _save_event(
+        db,
+        user["_id"],
+        order_oid,
+        "ORDER_MODIFIED",
+        str(order.get("status") or DEFERRED_MARKET_OPEN_STATUS),
+        append_order_log_prices(
+            f"{order['symbol']} deferred pending order updated locally (not yet at broker)",
+            updated,
+        ),
+        merge_order_log_payload(update_fields, source=updated),
+        symbol=order["symbol"],
+        broker_info=broker_info,
+    )
+    await live_state_hub.push_snapshot(db, str(user["_id"]))
+    return {
+        "ok": True,
+        "entry": new_entry,
+        "stop_loss": new_stop,
+        "target": new_target,
+        "quantity": new_qty,
+        "risk_amount": risk_amount,
+        "status": order.get("status"),
+    }
+
+
 def _normalize_trade_plan_account_targets(doc: dict) -> List[dict]:
     raw_targets = doc.get("account_targets") or []
     normalized = []
@@ -3002,7 +3115,15 @@ async def select_account(data: SelectAccountIn, user=Depends(get_current_user), 
 @app.delete("/accounts/{account_db_id}")
 async def delete_account(account_db_id: str, user=Depends(get_current_user), db=Depends(get_db)):
     account = await _get_account_by_db_id_async(user["_id"], account_db_id, db)
-    active_order_statuses = ["WAITING_TRIGGER", "PLACEMENT_PENDING", "PENDING", "FILLED", "POSITION_OPEN", "PARTIALLY_CLOSED"]
+    active_order_statuses = [
+        "WAITING_TRIGGER",
+        "PLACEMENT_PENDING",
+        "PENDING",
+        DEFERRED_MARKET_OPEN_STATUS,
+        "FILLED",
+        "POSITION_OPEN",
+        "PARTIALLY_CLOSED",
+    ]
     active_order = await db.orders.find_one_async(
         {
             "user_id": user["_id"],
@@ -4740,7 +4861,7 @@ async def get_active_orders(user=Depends(get_current_user), db=Depends(get_db)):
             "user_id": user["_id"],
             "dry_run": {"$ne": True},
             "$or": [
-                {"status": {"$in": ["WAITING_TRIGGER", "PLACEMENT_PENDING", "PENDING", "FILLED", "POSITION_OPEN", "PARTIALLY_CLOSED"]}},
+                {"status": {"$in": ["WAITING_TRIGGER", "PLACEMENT_PENDING", "PENDING", DEFERRED_MARKET_OPEN_STATUS, "FILLED", "POSITION_OPEN", "PARTIALLY_CLOSED"]}},
                 {
                     "created_at": {
                         "$gte": today_start_utc,
@@ -5332,6 +5453,49 @@ async def create_order(data: OrderCreateIn, user=Depends(get_current_user), db=D
             )
         except Exception as exc:
             failure_reason = str(exc)
+            if is_market_closed_error(exc):
+                context = dict(order_doc.get("manual_context") or {})
+                context["market_closed_offer"] = True
+                await db.orders.update_one_async(
+                    {"_id": order_doc["_id"]},
+                    {
+                        "$set": {
+                            "status": "PLACEMENT_PENDING",
+                            "failure_reason": failure_reason,
+                            "manual_context": context,
+                            "updated_at": datetime.utcnow(),
+                        }
+                    },
+                )
+                _save_event(
+                    db,
+                    user["_id"],
+                    order_doc["_id"],
+                    "ORDER_MARKET_CLOSED_OFFER",
+                    "PLACEMENT_PENDING",
+                    append_order_log_prices(
+                        f"{order_doc['symbol']} market closed; awaiting defer confirmation on "
+                        f"{broker_info.get('account_name', 'broker account')}: {failure_reason}",
+                        order_doc,
+                    ),
+                    merge_order_log_payload({"error": failure_reason, "market_closed": True}, source=order_doc),
+                    symbol=order_doc["symbol"],
+                    broker_info=broker_info,
+                    failure_reason=failure_reason,
+                )
+                placement_results.append(
+                    OrderPlacementResultOut(
+                        account_db_id=str(account["_id"]),
+                        account_name=_format_account_label(account),
+                        order_id=str(order_doc["_id"]),
+                        status="PLACEMENT_PENDING",
+                        quantity=quantity,
+                        failure_reason=failure_reason,
+                        market_closed=True,
+                    )
+                )
+                continue
+
             await db.orders.update_one_async(
                 {"_id": order_doc["_id"]},
                 {"$set": {"status": "FAILED", "failure_reason": failure_reason, "updated_at": datetime.utcnow()}},
@@ -5435,7 +5599,11 @@ async def create_order(data: OrderCreateIn, user=Depends(get_current_user), db=D
 
     placement_out = OrderPlacementOut(
         copy_group_id=copy_group_id,
-        success_count=sum(1 for result in placement_results if result.status != "FAILED"),
+        success_count=sum(
+            1
+            for result in placement_results
+            if result.status not in {"FAILED"} and not result.market_closed
+        ),
         failed_count=sum(1 for result in placement_results if result.status == "FAILED"),
         results=placement_results,
     )
@@ -5532,6 +5700,119 @@ async def get_order_events(order_id: str, user=Depends(get_current_user), db=Dep
     ]
 
 
+@app.post("/orders/{order_id}/defer-market-open")
+async def defer_order_market_open(order_id: str, user=Depends(get_current_user), db=Depends(get_db)):
+    try:
+        order_oid = parse_object_id(order_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid order id")
+    order = await db.orders.find_one_async({"_id": order_oid, "user_id": user["_id"]})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    status = str(order.get("status") or "").upper()
+    context = dict(order.get("manual_context") or {})
+    market_closed_offer = bool(context.get("market_closed_offer"))
+    if status != "PLACEMENT_PENDING" or not market_closed_offer:
+        if status == DEFERRED_MARKET_OPEN_STATUS:
+            return {
+                "ok": True,
+                "order_id": str(order_oid),
+                "status": DEFERRED_MARKET_OPEN_STATUS,
+                "place_after": order.get("place_after"),
+            }
+        raise HTTPException(status_code=400, detail="Order is not awaiting market-closed defer confirmation")
+
+    place_after = next_monday_0430_ist()
+    context["market_closed_offer"] = False
+    context["deferred_market_open"] = True
+    place_after_naive = place_after.replace(tzinfo=None) if place_after.tzinfo else place_after
+    updates = {
+        "status": DEFERRED_MARKET_OPEN_STATUS,
+        "place_after": place_after_naive,
+        "failure_reason": None,
+        "manual_context": context,
+        "updated_at": datetime.utcnow(),
+    }
+    await db.orders.update_one_async({"_id": order_oid}, {"$set": updates})
+    account = _get_order_account(order, user["_id"], db)
+    broker_info = _broker_info_from_account(account)
+    from zoneinfo import ZoneInfo
+
+    place_after_ist = place_after.astimezone(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d %H:%M IST")
+    _save_event(
+        db,
+        user["_id"],
+        order_oid,
+        "ORDER_DEFERRED_MARKET_OPEN",
+        DEFERRED_MARKET_OPEN_STATUS,
+        append_order_log_prices(
+            f"{order.get('symbol')} deferred until Monday 04:30 IST ({place_after_ist})",
+            {**order, **updates},
+        ),
+        merge_order_log_payload({"place_after": place_after.isoformat()}, source={**order, **updates}),
+        symbol=order.get("symbol"),
+        broker_info=order.get("broker_info") or broker_info,
+    )
+    await live_state_hub.push_snapshot(db, str(user["_id"]))
+    return {
+        "ok": True,
+        "order_id": str(order_oid),
+        "status": DEFERRED_MARKET_OPEN_STATUS,
+        "place_after": place_after.isoformat().replace("+00:00", "Z"),
+    }
+
+
+@app.post("/orders/{order_id}/decline-defer")
+async def decline_order_market_open_defer(order_id: str, user=Depends(get_current_user), db=Depends(get_db)):
+    try:
+        order_oid = parse_object_id(order_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid order id")
+    order = await db.orders.find_one_async({"_id": order_oid, "user_id": user["_id"]})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    status = str(order.get("status") or "").upper()
+    context = dict(order.get("manual_context") or {})
+    if status != "PLACEMENT_PENDING" or not context.get("market_closed_offer"):
+        if status == "FAILED":
+            return {"ok": True, "order_id": str(order_oid), "status": "FAILED"}
+        raise HTTPException(status_code=400, detail="Order is not awaiting market-closed defer confirmation")
+
+    failure_reason = str(order.get("failure_reason") or "Market closed; defer declined")
+    context["market_closed_offer"] = False
+    await db.orders.update_one_async(
+        {"_id": order_oid},
+        {
+            "$set": {
+                "status": "FAILED",
+                "failure_reason": failure_reason,
+                "manual_context": context,
+                "updated_at": datetime.utcnow(),
+                "closed_at": datetime.utcnow(),
+            }
+        },
+    )
+    account = _get_order_account(order, user["_id"], db)
+    broker_info = _broker_info_from_account(account)
+    _save_event(
+        db,
+        user["_id"],
+        order_oid,
+        "ORDER_DEFER_DECLINED",
+        "FAILED",
+        append_order_log_prices(
+            f"{order.get('symbol')} market-closed defer declined; order marked failed",
+            order,
+        ),
+        merge_order_log_payload({"error": failure_reason}, source=order),
+        symbol=order.get("symbol"),
+        broker_info=order.get("broker_info") or broker_info,
+        failure_reason=failure_reason,
+    )
+    await live_state_hub.push_snapshot(db, str(user["_id"]))
+    return {"ok": True, "order_id": str(order_oid), "status": "FAILED"}
+
+
 @app.post("/orders/{order_id}/modify")
 async def modify_order(order_id: str, data: OrderModifyIn, user=Depends(get_current_user), db=Depends(get_db)):
     try:
@@ -5542,12 +5823,17 @@ async def modify_order(order_id: str, data: OrderModifyIn, user=Depends(get_curr
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     status = str(order.get("status") or "").upper()
-    if status not in {"PENDING", "PLACEMENT_PENDING", "WAITING_TRIGGER"}:
+    if status not in {"PENDING", "PLACEMENT_PENDING", "WAITING_TRIGGER", DEFERRED_MARKET_OPEN_STATUS}:
         raise HTTPException(status_code=400, detail="Only pending orders can be modified")
 
     account = _get_order_account(order, user["_id"], db)
     broker_info = _broker_info_from_account(account)
     context = dict(order.get("manual_context") or {})
+    if status == DEFERRED_MARKET_OPEN_STATUS or (
+        status == "PLACEMENT_PENDING" and context.get("market_closed_offer")
+    ):
+        return await _modify_deferred_local_order(db, user, account, order, order_oid, data, broker_info)
+
     is_conditional_waiting = status == "WAITING_TRIGGER" or bool(context.get("conditional_order"))
     trigger_for_validation = data.trigger_price if data.trigger_price is not None else context.get("trigger_price")
     await _validate_order_payload(
@@ -5569,6 +5855,8 @@ async def modify_order(order_id: str, data: OrderModifyIn, user=Depends(get_curr
         data.target,
     )
 
+    if data.quantity is None:
+        raise HTTPException(status_code=400, detail="quantity is required")
     old_qty = round(float(order.get("quantity") or 0), 2)
     new_qty = round(float(data.quantity), 2)
     old_entry = float(order.get("entry") or 0)
@@ -5806,11 +6094,44 @@ async def cancel_pending_order(order_id: str, user=Depends(get_current_user), db
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     status = str(order.get("status") or "").upper()
-    if status not in {"PENDING", "PLACEMENT_PENDING", "WAITING_TRIGGER"}:
+    if status not in {"PENDING", "PLACEMENT_PENDING", "WAITING_TRIGGER", DEFERRED_MARKET_OPEN_STATUS}:
         raise HTTPException(status_code=400, detail="Only pending orders can be cancelled")
 
     account = _get_order_account(order, user["_id"], db)
     broker_info = _broker_info_from_account(account)
+
+    if status == DEFERRED_MARKET_OPEN_STATUS or (
+        status == "PLACEMENT_PENDING"
+        and bool((order.get("manual_context") or {}).get("market_closed_offer"))
+    ):
+        await db.orders.update_one_async(
+            {"_id": order_oid},
+            {
+                "$set": {
+                    "status": "CANCELLED",
+                    "updated_at": datetime.utcnow(),
+                    "closed_at": datetime.utcnow(),
+                    "broker_info": broker_info,
+                    "failure_reason": "Deferred pending order cancelled before broker placement",
+                }
+            },
+        )
+        _save_event(
+            db,
+            user["_id"],
+            order_oid,
+            "ORDER_CANCELLED",
+            "CANCELLED",
+            append_order_log_prices(
+                f"{order['symbol']} deferred pending order cancelled before broker placement",
+                order,
+            ),
+            merge_order_log_payload(source=order),
+            symbol=order["symbol"],
+            broker_info=order.get("broker_info") or broker_info,
+        )
+        await live_state_hub.push_snapshot(db, str(user["_id"]))
+        return {"ok": True, "cancelled_deferred": True}
 
     if status == "WAITING_TRIGGER" or not order.get("meta_order_id"):
         if status == "WAITING_TRIGGER" or (
