@@ -200,6 +200,41 @@ function formatCurrencyValue(value) {
   }).format(numericValue);
 }
 
+/** Possible profit/loss at target vs SL, e.g. "200/80". Requires known SL + Target + risk. */
+function expectedRewardRiskLabel(order) {
+  const stop = Number(order?.stop_loss);
+  const target = Number(order?.target);
+  const entry = Number(order?.entry);
+  const risk = Number(order?.risk_amount);
+  if (!Number.isFinite(stop) || stop <= 0) return null;
+  if (!Number.isFinite(target) || target <= 0) return null;
+  if (!Number.isFinite(risk) || risk <= 0) return null;
+  let rr = Number(order?.rr_ratio);
+  if (!Number.isFinite(rr) || rr <= 0) {
+    if (!Number.isFinite(entry) || entry <= 0) return null;
+    const riskDist = Math.abs(entry - stop);
+    const rewardDist = Math.abs(target - entry);
+    if (riskDist <= 0) return null;
+    rr = rewardDist / riskDist;
+  }
+  const reward = risk * rr;
+  if (!Number.isFinite(reward) || reward <= 0) return null;
+  return `${Math.round(reward)}/${Math.round(risk)}`;
+}
+
+function renderExpectedRewardRisk(order) {
+  const label = expectedRewardRiskLabel(order);
+  if (!label) return <span className="text-slate-400">—</span>;
+  const [reward, risk] = label.split("/");
+  return (
+    <span className="font-semibold tabular-nums" title="Possible profit / loss (target / SL)">
+      <span className="text-emerald-700 dark:text-emerald-400">{reward}</span>
+      <span className="text-slate-400">/</span>
+      <span className="text-rose-700 dark:text-rose-400">{risk}</span>
+    </span>
+  );
+}
+
 function formatPartialExits(value) {
   if (!Array.isArray(value) || value.length === 0) return "-";
   return value
@@ -2790,11 +2825,23 @@ function OrderScreen({
         </div>
       </div>
       {preview && (
-        <div className="mt-2 grid grid-cols-4 gap-1 rounded-xl border border-indigo-100 bg-indigo-50 p-2 text-[10px] text-slate-700">
+        <div className="mt-2 grid grid-cols-5 gap-1 rounded-xl border border-indigo-100 bg-indigo-50 p-2 text-[10px] text-slate-700">
           <p><span className="block font-semibold uppercase tracking-wide text-slate-500">SL Distance</span> <span className="font-bold text-slate-900">{formatDistanceValue(form.symbol, preview.sl_pips)}</span></p>
           <p><span className="block font-semibold uppercase tracking-wide text-slate-500">Accounts</span> <span className="font-bold text-slate-900">{preview.targets.length}</span></p>
           <p><span className="block font-semibold uppercase tracking-wide text-slate-500">Risk</span> <span className="font-bold text-slate-900">{preview.targets.reduce((sum, item) => sum + Number(item.risk_amount || 0), 0)}</span></p>
           <p><span className="block font-semibold uppercase tracking-wide text-slate-500">R:R</span> <span className="font-bold text-slate-900">{preview.rr_ratio ?? "-"}</span></p>
+          <p>
+            <span className="block font-semibold uppercase tracking-wide text-slate-500">Exp</span>{" "}
+            <span className="font-bold text-slate-900">
+              {renderExpectedRewardRisk({
+                stop_loss: sl,
+                target,
+                entry: effectiveEntry,
+                risk_amount: preview.targets.reduce((sum, item) => sum + Number(item.risk_amount || 0), 0),
+                rr_ratio: preview.rr_ratio,
+              })}
+            </span>
+          </p>
         </div>
       )}
       {previewError && (
@@ -3430,7 +3477,7 @@ function Tracker({ rows, onOpenClose, onEditOrder, onFullClose, onCancelOrder, a
 
   const renderRowsTable = (items, options = {}) => {
     const { showAction = true, plVariant = "active", showBroker = true } = options;
-    const columnCount = showBroker ? 10 : 9;
+    const columnCount = showBroker ? 11 : 10;
     return (
         <div className="overflow-auto">
           <table className="w-full text-sm">
@@ -3444,6 +3491,7 @@ function Tracker({ rows, onOpenClose, onEditOrder, onFullClose, onCancelOrder, a
                 <th className="px-2 py-2">SL</th>
                 <th className="px-2 py-2">Target</th>
                 <th className="px-2 py-2">R:R</th>
+                <th className="px-2 py-2">Exp</th>
                 <th className="px-2 py-2">{showAction ? "P/L" : "Details"}</th>
                 <th className="px-2 py-2 text-right">{showAction ? "Action" : "Updated"}</th>
               </tr>
@@ -3496,6 +3544,7 @@ function Tracker({ rows, onOpenClose, onEditOrder, onFullClose, onCancelOrder, a
                       <td className="px-2 py-2">{formatPrice(row.stop_loss, relatedPriceValues)}</td>
                       <td className="px-2 py-2">{formatPrice(row.target, relatedPriceValues)}</td>
                       <td className="px-2 py-2">{row.rr_ratio ?? "-"}</td>
+                      <td className="px-2 py-2 text-xs">{renderExpectedRewardRisk(row)}</td>
                       <td className="px-2 py-2">
                         {showAction ? (
                           plVariant === "closed" || isClosed ? (
@@ -3750,7 +3799,10 @@ function Tracker({ rows, onOpenClose, onEditOrder, onFullClose, onCancelOrder, a
             <th className="px-2 py-2">Side</th>
             <th className="px-2 py-2">Type</th>
             <th className="px-2 py-2">Price</th>
+            <th className="px-2 py-2">SL</th>
+            <th className="px-2 py-2">Target</th>
             <th className="px-2 py-2">Qty</th>
+            <th className="px-2 py-2">Exp</th>
             <th className="px-2 py-2">Status</th>
             <th className="px-2 py-2 text-right">Action</th>
           </tr>
@@ -3772,7 +3824,10 @@ function Tracker({ rows, onOpenClose, onEditOrder, onFullClose, onCancelOrder, a
                 </td>
                 <td className="px-2 py-2 text-slate-700 dark:text-slate-300">{orderTypeLabel(row)}</td>
                 <td className="px-2 py-2 text-slate-700 dark:text-slate-300">{formatPrice(price)}</td>
+                <td className="px-2 py-2 text-slate-700 dark:text-slate-300">{row.stop_loss != null ? formatPrice(row.stop_loss) : "—"}</td>
+                <td className="px-2 py-2 text-slate-700 dark:text-slate-300">{row.target != null ? formatPrice(row.target) : "—"}</td>
                 <td className="px-2 py-2 text-slate-700 dark:text-slate-300">{formatQty(row.quantity ?? row.position_quantity)}</td>
+                <td className="px-2 py-2 text-xs">{renderExpectedRewardRisk(row)}</td>
                 <td className="px-2 py-2">
                   {row.derived ? (
                     <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-200">Working</span>
@@ -3839,7 +3894,9 @@ function Tracker({ rows, onOpenClose, onEditOrder, onFullClose, onCancelOrder, a
             <th className="px-2 py-2">Trigger</th>
             <th className="px-2 py-2">Entry</th>
             <th className="px-2 py-2">SL</th>
+            <th className="px-2 py-2">Target</th>
             <th className="px-2 py-2">Qty</th>
+            <th className="px-2 py-2">Exp</th>
             <th className="px-2 py-2">Status</th>
             <th className="px-2 py-2 text-right">Action</th>
           </tr>
@@ -3862,7 +3919,9 @@ function Tracker({ rows, onOpenClose, onEditOrder, onFullClose, onCancelOrder, a
                 <td className="px-2 py-2 font-semibold text-indigo-700 dark:text-indigo-300">{formatPrice(trigger)}</td>
                 <td className="px-2 py-2 text-slate-700 dark:text-slate-300">{formatPrice(row.entry)}</td>
                 <td className="px-2 py-2 text-slate-700 dark:text-slate-300">{formatPrice(row.stop_loss)}</td>
+                <td className="px-2 py-2 text-slate-700 dark:text-slate-300">{row.target != null ? formatPrice(row.target) : "—"}</td>
                 <td className="px-2 py-2 text-slate-700 dark:text-slate-300">{formatQty(row.quantity ?? row.position_quantity)}</td>
+                <td className="px-2 py-2 text-xs">{renderExpectedRewardRisk(row)}</td>
                 <td className="px-2 py-2">
                   <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusTone(row.status)}`}>{humanizeStatus(row.status)}</span>
                 </td>
@@ -3927,6 +3986,7 @@ function Tracker({ rows, onOpenClose, onEditOrder, onFullClose, onCancelOrder, a
             <th className="px-2 py-2">Qty</th>
             <th className="px-2 py-2">Risk</th>
             <th className="px-2 py-2">RRR</th>
+            <th className="px-2 py-2">Exp</th>
             <th className="px-2 py-2">Send after</th>
             <th className="px-2 py-2 text-right">Action</th>
           </tr>
@@ -3954,6 +4014,7 @@ function Tracker({ rows, onOpenClose, onEditOrder, onFullClose, onCancelOrder, a
               <td className="px-2 py-2 font-semibold text-indigo-700 dark:text-indigo-300">
                 {row.rr_ratio != null && row.rr_ratio !== "" ? `${row.rr_ratio}R` : "—"}
               </td>
+              <td className="px-2 py-2 text-xs">{renderExpectedRewardRisk(row)}</td>
               <td className="px-2 py-2 text-xs text-slate-600 dark:text-slate-400">{row.place_after ? formatNotificationTimestamp(row.place_after) : "Mon 04:30 IST"}</td>
               <td className="px-2 py-2 text-right">
                 <div className="flex justify-end gap-2">
@@ -4154,6 +4215,7 @@ function Tracker({ rows, onOpenClose, onEditOrder, onFullClose, onCancelOrder, a
             <th className="px-2 py-2">SL</th>
             <th className="px-2 py-2">Target</th>
             <th className="px-2 py-2">R:R</th>
+            <th className="px-2 py-2">Exp</th>
             <th className="px-2 py-2">P/L</th>
             <th className="px-2 py-2 text-right">Action</th>
           </tr>
@@ -4187,6 +4249,7 @@ function Tracker({ rows, onOpenClose, onEditOrder, onFullClose, onCancelOrder, a
                   <td className="px-2 py-2 text-slate-700 dark:text-slate-300">{formatPrice(row.stop_loss, relatedPriceValues)}</td>
                   <td className="px-2 py-2 text-slate-700 dark:text-slate-300">{formatPrice(row.target, relatedPriceValues)}</td>
                   <td className="px-2 py-2 text-slate-700 dark:text-slate-300">{row.rr_ratio ?? "-"}</td>
+                  <td className="px-2 py-2 text-xs">{renderExpectedRewardRisk(row)}</td>
                   <td className="px-2 py-2">
                     <p className={`text-xs font-semibold ${Number(row.realized_pl || 0) >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
                       {formatCurrencyValue(row.realized_pl || 0)}
@@ -4198,7 +4261,7 @@ function Tracker({ rows, onOpenClose, onEditOrder, onFullClose, onCancelOrder, a
                 </tr>
                 {expanded ? (
                   <tr className="border-b border-slate-100 bg-slate-50/70 dark:border-slate-800 dark:bg-slate-950/70">
-                    <td colSpan={10} className="px-3 py-3">
+                    <td colSpan={11} className="px-3 py-3">
                       {row.placement_fallback_reason ? (
                         <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 dark:border-amber-900/60 dark:bg-amber-950/30">
                           <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">Placement Note</p>
