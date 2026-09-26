@@ -5,7 +5,7 @@ Orders that have a known stop loss, target, and risk amount now show an **Exp** 
 Shown on:
 
 - Open positions
-- Deferred market-closed pending orders
+- Deferred market-closed pending orders (Risk column omitted; loss is the second number in Exp)
 - Open / stop / conditional order tables (when SL+Target+risk are present)
 - Place Order preview
 
