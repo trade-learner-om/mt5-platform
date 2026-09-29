@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
-import ActivePositions from "./ActivePositions";
 import LiveWatchlist from "./LiveWatchlist";
-import { resolveSymbolPriceDigits } from "../../utils/pricePrecision";
+import OrderTracker from "./OrderTracker";
 
 const POSITIONS_HEIGHT_KEY = "sb_active_positions_height";
 const DEFAULT_POSITIONS_HEIGHT = 192;
@@ -19,34 +18,6 @@ function loadPositionsHeight() {
     // ignore storage errors
   }
   return DEFAULT_POSITIONS_HEIGHT;
-}
-
-function normalizePositionRows(liveOrders = [], livePrices = {}, symbolPriceDigits = {}) {
-  return (liveOrders || [])
-    .filter((row) => ["FILLED", "POSITION_OPEN", "PARTIALLY_CLOSED"].includes(String(row.status || "").toUpperCase()))
-    .map((row) => {
-      const side = String(row.side || "").toUpperCase();
-      const symbol = row.symbol;
-      const priceQuote = livePrices?.[String(symbol || "").toUpperCase()] || livePrices?.[symbol] || {};
-      const bid = Number(priceQuote.bid ?? priceQuote.price);
-      const ask = Number(priceQuote.ask ?? priceQuote.price);
-      const closePrice = side === "SELL"
-        ? (Number.isFinite(ask) ? ask : Number(priceQuote.price))
-        : (Number.isFinite(bid) ? bid : Number(priceQuote.price));
-      return {
-        id: row.id,
-        symbol,
-        side,
-        type: side === "SELL" ? "Short" : "Long",
-        size: Number(row.position_quantity ?? row.quantity ?? 0).toFixed(2),
-        positionQuantity: Number(row.position_quantity ?? row.quantity ?? 0),
-        openPrice: row.entry,
-        pnl: Number(row.unrealized_pl ?? 0),
-        priceDigits: resolveSymbolPriceDigits(row.symbol, livePrices, symbolPriceDigits),
-        currentPrice: Number.isFinite(closePrice) ? closePrice : null,
-        raw: row,
-      };
-    });
 }
 
 export default function TerminalDashboard({
@@ -68,11 +39,9 @@ export default function TerminalDashboard({
   onAccountRiskSaved,
   me,
   onMeUpdated,
-  onFullClosePosition,
-  onOpenPartialClose,
-  actionLoadingId = "",
 }) {
   const [positionsHeight, setPositionsHeight] = useState(loadPositionsHeight);
+  const [editingOrder, setEditingOrder] = useState(null);
 
   useEffect(() => {
     try {
@@ -81,11 +50,6 @@ export default function TerminalDashboard({
       // ignore storage errors
     }
   }, [positionsHeight]);
-
-  const positionRows = useMemo(
-    () => normalizePositionRows(liveOrders, livePrices, symbolPriceDigits),
-    [liveOrders, livePrices, symbolPriceDigits]
-  );
 
   const watchlistRows = useMemo(
     () => (liveWatchlist || []).filter((item) => item?.symbol),
@@ -150,6 +114,8 @@ export default function TerminalDashboard({
             onAccountRiskSaved={onAccountRiskSaved}
             me={me}
             onMeUpdated={onMeUpdated}
+            editingOrder={editingOrder}
+            onEditingCleared={() => setEditingOrder(null)}
           />
         ) : null}
       </div>
@@ -158,7 +124,7 @@ export default function TerminalDashboard({
         <div
           role="separator"
           aria-orientation="horizontal"
-          aria-label="Resize active positions"
+          aria-label="Resize order tracker"
           aria-valuemin={MIN_POSITIONS_HEIGHT}
           aria-valuemax={MAX_POSITIONS_HEIGHT}
           aria-valuenow={positionsHeight}
@@ -178,11 +144,10 @@ export default function TerminalDashboard({
           <span className="h-1 w-12 rounded-full bg-slate-300 transition hover:bg-indigo-400 dark:bg-slate-600 dark:hover:bg-indigo-500" />
         </div>
         <div className="h-full min-h-0">
-          <ActivePositions
-            rows={positionRows}
-            actionLoadingId={actionLoadingId}
-            onFullClose={onFullClosePosition}
-            onPartialClose={onOpenPartialClose}
+          <OrderTracker
+            token={token}
+            liveOrders={liveOrders}
+            onEdit={setEditingOrder}
           />
         </div>
       </div>

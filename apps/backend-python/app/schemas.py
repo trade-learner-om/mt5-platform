@@ -122,8 +122,8 @@ class OrderCreateIn(BaseModel):
 
 class QuickOrderIn(BaseModel):
     symbol: str
-    timeframe: str = "M1"
-    side: str
+    timeframe: str = "M5"
+    side: Optional[str] = None
     comment: Optional[str] = None
     targets: List[OrderTargetIn] = Field(default_factory=list)
     automatic_trade_management: bool = True
@@ -132,11 +132,14 @@ class QuickOrderIn(BaseModel):
 class QuickOrderPreviewOut(BaseModel):
     symbol: str
     timeframe: str
-    side: str
-    entry: float
-    stop_loss: float
+    side: Optional[str] = None
+    entry: Optional[float] = None
+    stop_loss: Optional[float] = None
+    sl_pips: Optional[float] = None
+    candle_open: float
     candle_high: float
     candle_low: float
+    candle_close: float
     candle_time: datetime
     tick_size: float
     price_digits: int = 5
@@ -451,6 +454,11 @@ class PaginatedOrdersOut(BaseModel):
     page: int
     page_size: int
     total: int
+
+
+class OrderHistoryPageOut(BaseModel):
+    records: List[OrderRowOut]
+    next_cursor: Optional[str] = None
 
 
 class BrokerTradeHistoryRowOut(BaseModel):

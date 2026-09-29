@@ -15,7 +15,7 @@ Order endpoints live in `apps/backend-python/app/main.py`:
 - `POST /orders/{order_id}/defer-market-open`
 - `POST /orders/{order_id}/decline-defer`
 - `GET /orders/{order_id}/events`
-- `GET /orders/history`
+- `GET /orders/history` (`limit` + `cursor`, newest first, `{ records, next_cursor }`)
 
 Local order records are stored in `orders`; audit events are stored in `order_events`; user activity appears in `notifications`.
 
@@ -100,9 +100,22 @@ Manual runtime events include:
 
 `GET /orders/{order_id}/events` returns related parent/child activity with IST timestamps.
 
+## Candle SL order desk
+
+The trading screen ticket places **SL** orders from the last completed M1, M5, or M15 candle (default M5). `POST /orders/quick/preview` returns that candle's open, high, low, and close before a side is chosen. After Buy or Sell:
+
+- Buy entry is high + 1 tick and stop is low − 1 tick
+- Sell entry is low − 1 tick and stop is high + 1 tick
+- `sl_pips` uses `calc_sl_pips` and is recalculated when entry or stop changes
+- Optional target shows `calc_rr` (`reward / risk`)
+- Quantity comes from the account risk amount through `/risk-preview/multi`
+- Placement is `POST /orders` with `order_type: "SL"` so edited prices are sent as entered
+
+The bottom tracker replaces the trading-screen active-positions strip. Labels are title case: `PENDING` / `PLACEMENT_PENDING` show as **Placed**, `FILLED` / `POSITION_OPEN` / `PARTIALLY_CLOSED` as **In Position** (running P/L), and `CLOSED` as **Closed** (realised P/L). Recent is today's orders from `/ws/live` in the app timezone. History is older than today and uses the cursor on `GET /orders/history` (no offset skip).
+
 ## Modify Pending Order
 
-`POST /orders/{order_id}/modify` accepts `{ entry, stop_loss, target?, quantity }` for orders in `PENDING` or `PLACEMENT_PENDING` only.
+`POST /orders/{order_id}/modify` accepts `{ entry, stop_loss, target?, quantity }` for `PENDING`, `PLACEMENT_PENDING`, `WAITING_TRIGGER`, and `DEFERRED_MARKET_OPEN`.
 
 Broker behavior:
 
@@ -110,9 +123,11 @@ Broker behavior:
 - **Quantity changed** — cancel the existing broker pending order, update the local record, then place a new pending order with the new quantity.
 - **No broker order yet** (`meta_order_id` missing) — update the local record and call `place_pending_order`.
 
+Open positions (`FILLED`, `POSITION_OPEN`, `PARTIALLY_CLOSED`) use the same route for stop and target only, through `modify_position` (`TRADE_ACTION_SLTP`). Quantity stays at the filled size.
+
 Events: `ORDER_MODIFIED`, `ORDER_REPLACED`, `ORDER_CANCELLED_FOR_MODIFY`, or `ORDER_UPDATED` depending on path.
 
-Web, Android, and iOS expose an Edit action on pending rows with the same fields and copy explaining quantity vs in-place updates.
+The trading desk Edit action loads a Placed or In Position row back into the ticket. Web, Android, and iOS still expose Edit on pending rows elsewhere.
 
 ## Local MT5 Notes
 

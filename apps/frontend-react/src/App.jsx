@@ -1874,19 +1874,23 @@ function OrderScreen({
   onAccountRiskSaved,
   me,
   onMeUpdated,
+  editingOrder = null,
+  onEditingCleared,
 }) {
   const savedOrderDefaults = me?.ui_settings?.order_defaults || {};
   const defaultAtm = savedOrderDefaults.automatic_trade_management !== false;
   const defaultRetryable = savedOrderDefaults.retryable_order !== false;
-  const [orderMode, setOrderMode] = useState("quick");
-  const [quickTimeframe, setQuickTimeframe] = useState("M1");
+  const [quickTimeframe, setQuickTimeframe] = useState("M5");
   const [quickQuote, setQuickQuote] = useState(null);
   const [quickQuoteError, setQuickQuoteError] = useState("");
   const quickQuoteRequestRef = useRef(0);
+  const quoteFillKeyRef = useRef("");
+  const loadedEditIdRef = useRef("");
+  const userEditedPricesRef = useRef(false);
   const [form, setForm] = useState({
     symbol: "EURUSD",
     order_type: "SL",
-    side: "BUY",
+    side: "",
     entry: "",
     stop_loss: "",
     target: "",
@@ -1922,11 +1926,12 @@ function OrderScreen({
   const cancelAt = form.cancel_at ? Number(form.cancel_at) : null;
   const triggerPrice = form.trigger_price ? Number(form.trigger_price) : null;
   const disabled = !selectedAccountExists || placingOrder;
-  const isQuickOrder = orderMode === "quick";
-  const effectiveOrderType = isQuickOrder ? "MARKET" : form.order_type;
-  const isMarketOrder = effectiveOrderType === "MARKET";
-  const isConditionalSl = !isQuickOrder && effectiveOrderType === "SL" && Boolean(form.conditional_order);
-  const effectiveEntry = isMarketOrder ? Number(marketPrice || entry || 0) : entry;
+  const effectiveOrderType = "SL";
+  const isMarketOrder = false;
+  const isConditionalSl = false;
+  const editingStatus = String(editingOrder?.status || "").toUpperCase();
+  const editingOpenPosition = ["FILLED", "POSITION_OPEN", "PARTIALLY_CLOSED"].includes(editingStatus);
+  const effectiveEntry = entry;
 
   useEffect(() => {
     const defaults = me?.ui_settings?.order_defaults;
@@ -1978,9 +1983,33 @@ function OrderScreen({
   }, [accounts, activeAccountId]);
 
   useEffect(() => {
-    if (!selectedInstrument) return;
+    if (!selectedInstrument || editingOrder?.id) return;
     setForm((current) => ({ ...current, symbol: selectedInstrument }));
-  }, [selectedInstrument]);
+  }, [selectedInstrument, editingOrder?.id]);
+
+  useEffect(() => {
+    if (!editingOrder?.id) {
+      loadedEditIdRef.current = "";
+      return;
+    }
+    if (loadedEditIdRef.current === editingOrder.id) return;
+    loadedEditIdRef.current = editingOrder.id;
+    const side = String(editingOrder.side || "").toUpperCase();
+    quoteFillKeyRef.current = `${String(editingOrder.symbol || "").trim().toUpperCase()}|${quickTimeframe}|${side}`;
+    setForm((current) => ({
+      ...current,
+      symbol: editingOrder.symbol || current.symbol,
+      order_type: "SL",
+      side,
+      entry: editingOrder.entry == null ? "" : String(editingOrder.entry),
+      stop_loss: editingOrder.stop_loss == null ? "" : String(editingOrder.stop_loss),
+      target: editingOrder.target == null ? "" : String(editingOrder.target),
+      comment: editingOrder.comment || "",
+    }));
+    if (editingOrder.account_id) {
+      setSelectedTargetIds([editingOrder.account_id]);
+    }
+  }, [editingOrder]);
 
   useEffect(() => {
     if (!selectedAccountExists || !activeAccountId || !form.symbol.trim()) {
@@ -2074,18 +2103,19 @@ function OrderScreen({
   }, [form.symbol, livePrices, liveSymbol, selectedAccountExists]);
 
   useEffect(() => {
-    if (!isQuickOrder || !selectedAccountExists || !form.symbol.trim()) {
+    if (!selectedAccountExists || !form.symbol.trim()) {
       setQuickQuote(null);
       setQuickQuoteError("");
       return;
     }
+    userEditedPricesRef.current = false;
     const requestId = ++quickQuoteRequestRef.current;
     const loadQuickQuote = async () => {
       try {
         const quote = await api("/orders/quick/preview", "POST", {
           symbol: form.symbol.trim().toUpperCase(),
           timeframe: quickTimeframe,
-          side: form.side,
+          side: form.side || null,
           targets: selectedTargetIds.flatMap((accountId) => {
             const riskAmount = Number(riskInputs[accountId]);
             return Number.isFinite(riskAmount) && riskAmount > 0
@@ -2096,23 +2126,30 @@ function OrderScreen({
         if (requestId !== quickQuoteRequestRef.current) return;
         setQuickQuote(quote);
         setQuickQuoteError("");
+        const side = String(form.side || "").toUpperCase();
+        if ((side !== "BUY" && side !== "SELL") || quote.entry == null || quote.stop_loss == null) return;
+        const fillKey = `${form.symbol.trim().toUpperCase()}|${quickTimeframe}|${side}`;
+        if (quoteFillKeyRef.current === fillKey || userEditedPricesRef.current) {
+          quoteFillKeyRef.current = fillKey;
+          return;
+        }
+        quoteFillKeyRef.current = fillKey;
         setForm((current) => ({
           ...current,
           entry: String(quote.entry),
           stop_loss: String(quote.stop_loss),
-          target: "",
         }));
       } catch (error) {
         if (requestId !== quickQuoteRequestRef.current) return;
         setQuickQuote(null);
-        setQuickQuoteError(error?.message || "Quick Order quote is unavailable.");
+        setQuickQuoteError(error?.message || "Candle quote is unavailable.");
       }
     };
     loadQuickQuote();
     return () => {
       quickQuoteRequestRef.current += 1;
     };
-  }, [isQuickOrder, selectedAccountExists, form.symbol, form.side, quickTimeframe, token, activeAccountId, accounts, riskInputs, selectedTargetIds]);
+  }, [selectedAccountExists, form.symbol, form.side, quickTimeframe, token, activeAccountId, accounts, selectedTargetIds]);
 
   const selectedTargets = useMemo(() => {
     return selectedTargetIds
@@ -2162,7 +2199,8 @@ function OrderScreen({
 
   const fieldErrors = {
     symbol: form.symbol.trim() ? "" : "Symbol is required.",
-    entry: isMarketOrder
+    side: form.side === "BUY" || form.side === "SELL" ? "" : "Select Buy or Sell.",
+    entry: !form.side
       ? ""
       : !Number.isFinite(entry) || entry <= 0
       ? "Entry must be a valid positive number."
@@ -2170,23 +2208,27 @@ function OrderScreen({
         ? "Conditional SELL entry must be below trigger price."
       : isConditionalSl && form.side === "BUY" && Number.isFinite(triggerPrice) && entry <= triggerPrice
           ? "Conditional BUY entry must be above trigger price."
-      : !isConditionalSl && marketPrice !== null && effectiveOrderType === "SL" && form.side === "BUY" && entry <= marketPrice
+      : !editingOpenPosition && marketPrice !== null && form.side === "BUY" && entry <= marketPrice
         ? "SL BUY entry must be above current price."
-      : !isConditionalSl && marketPrice !== null && effectiveOrderType === "SL" && form.side === "SELL" && entry >= marketPrice
+      : !editingOpenPosition && marketPrice !== null && form.side === "SELL" && entry >= marketPrice
           ? "SL SELL entry must be below current price."
       : marketPrice !== null && effectiveOrderType === "LIMIT" && form.side === "BUY" && entry >= marketPrice
             ? "LIMIT BUY entry must be below current price."
       : marketPrice !== null && effectiveOrderType === "LIMIT" && form.side === "SELL" && entry <= marketPrice
               ? "LIMIT SELL entry must be above current price."
               : "",
-    stop_loss: !Number.isFinite(sl) || sl <= 0
+    stop_loss: !form.side
+      ? ""
+      : !Number.isFinite(sl) || sl <= 0
       ? "Stop Loss must be a valid positive number."
       : Number.isFinite(effectiveEntry) && form.side === "BUY" && sl >= effectiveEntry
         ? "For BUY, Stop Loss must be below entry."
         : Number.isFinite(effectiveEntry) && form.side === "SELL" && sl <= effectiveEntry
           ? "For SELL, Stop Loss must be above entry."
           : "",
-    target: form.target && target === null
+    target: !form.side
+      ? ""
+      : form.target && target === null
       ? "Target must be a valid number."
       : target !== null && form.side === "BUY" && target <= effectiveEntry
         ? "For BUY, target should be above entry."
@@ -2220,7 +2262,7 @@ function OrderScreen({
             : "",
   };
   const formError = !selectedAccountExists ? "Select a local MT5 account before placing orders." : "";
-  const hasValidationErrors = Boolean(formError || Object.values(fieldErrors).some(Boolean) || (isQuickOrder && !quickQuote));
+  const hasValidationErrors = Boolean(formError || Object.values(fieldErrors).some(Boolean));
 
   const saveAccountRisk = async (accountId) => {
     const riskAmount = Number(riskInputs[accountId]);
@@ -2268,19 +2310,40 @@ function OrderScreen({
           risk_amount: item.risk_amount
         }))
       };
-      const result = isQuickOrder
-        ? await api("/orders/quick", "POST", { ...payload, timeframe: quickTimeframe }, token)
-        : await api("/orders", "POST", {
+      if (editingOrder?.id) {
+        const accountPreview = (preview?.targets || []).find((item) => item.account_db_id === editingOrder.account_id) || preview?.targets?.[0];
+        const quantity = editingOpenPosition
+          ? Number(editingOrder.position_quantity ?? editingOrder.quantity)
+          : Number(accountPreview?.quantity);
+        if (!Number.isFinite(quantity) || quantity <= 0) {
+          onNotify("error", editingOpenPosition ? "Open quantity is missing." : "Quantity is not ready yet. Check the risk amount.");
+          return;
+        }
+        await api(`/orders/${editingOrder.id}/modify`, "POST", {
+          entry: editingOpenPosition ? Number(editingOrder.entry) : effectiveEntry,
+          stop_loss: sl,
+          target,
+          quantity,
+        }, token);
+        onNotify("success", editingOpenPosition ? "Position stop and target updated." : "Order updated.");
+        quoteFillKeyRef.current = "";
+        setForm((current) => ({ ...current, side: "", entry: "", stop_loss: "", target: "", comment: "" }));
+        setSubmitAttempted(false);
+        setTouchedFields({});
+        onEditingCleared?.();
+        return;
+      }
+      const result = await api("/orders", "POST", {
             ...form,
             ...payload,
-            order_type: effectiveOrderType,
+            order_type: "SL",
             entry: effectiveEntry,
             stop_loss: sl,
             target,
-            cancel_at: effectiveOrderType === "LIMIT" && form.cancel_at ? cancelAt : null,
-            conditional_order: isConditionalSl,
-            trigger_price: isConditionalSl ? triggerPrice : null,
-            retryable_order: (effectiveOrderType === "LIMIT" || effectiveOrderType === "SL") ? form.retryable_order : false,
+            cancel_at: null,
+            conditional_order: false,
+            trigger_price: null,
+            retryable_order: form.retryable_order,
           }, token);
       const closedOffers = (result.results || []).filter((item) => item.market_closed && item.order_id);
       if (closedOffers.length) {
@@ -2292,8 +2355,10 @@ function OrderScreen({
       }
       if (result.failed_count === 0 && !closedOffers.length) {
         const defaults = me?.ui_settings?.order_defaults || {};
+        quoteFillKeyRef.current = "";
         setForm((current) => ({
           ...current,
+          side: "",
           entry: "",
           stop_loss: "",
           target: "",
@@ -2416,13 +2481,22 @@ function OrderScreen({
       <div className="mb-3 space-y-2">
         <div className="flex items-end justify-between gap-3">
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-indigo-500">Trade Ticket</p>
-            <h3 className="text-xl font-bold leading-tight text-slate-950">Place Order</h3>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-indigo-500">SL Order Desk</p>
+            <h3 className="text-xl font-bold leading-tight text-slate-950">{editingOrder?.id ? "Edit Order" : "Place SL Order"}</h3>
           </div>
-          <div className="grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
-            <button type="button" onClick={() => setOrderMode("quick")} className={`rounded-lg px-2 py-1 text-[10px] font-bold ${isQuickOrder ? "bg-indigo-600 text-white shadow" : "text-slate-500"}`}>Quick</button>
-            <button type="button" onClick={() => setOrderMode("manual")} className={`rounded-lg px-2 py-1 text-[10px] font-bold ${!isQuickOrder ? "bg-indigo-600 text-white shadow" : "text-slate-500"}`}>Manual</button>
-          </div>
+          {editingOrder?.id ? (
+            <button
+              type="button"
+              onClick={() => {
+                quoteFillKeyRef.current = "";
+                setForm((current) => ({ ...current, side: "", entry: "", stop_loss: "", target: "", comment: "" }));
+                onEditingCleared?.();
+              }}
+              className="rounded-lg border border-slate-200 px-2 py-1 text-[10px] font-bold text-slate-600"
+            >
+              New order
+            </button>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
         <span className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-700">
@@ -2463,7 +2537,7 @@ function OrderScreen({
           <input
             className={`w-full rounded-lg border px-2.5 py-1.5 text-xs outline-none disabled:bg-slate-100 ${inputTone(hasVisibleFieldError("symbol", touchedFields, submitAttempted) && fieldErrors.symbol)}`}
             value={form.symbol}
-            disabled={disabled}
+            disabled={disabled || Boolean(editingOrder?.id)}
             onChange={(e) => setForm({ ...form, symbol: e.target.value.toUpperCase() })}
             onBlur={() => markTouched("symbol")}
             placeholder="Symbol"
@@ -2472,45 +2546,27 @@ function OrderScreen({
             <p className="text-xs text-rose-600">{fieldErrors.symbol}</p>
           )}
         </label>
-        {isQuickOrder ? (
-          <div className="grid grid-cols-2 gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 p-2.5">
+        <div className="grid gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 p-2.5">
+          <div className="grid grid-cols-[auto_1fr] items-end gap-2">
             <label className="space-y-0.5 text-xs">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Candle timeframe</span>
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Timeframe</span>
               <select value={quickTimeframe} disabled={disabled} onChange={(event) => setQuickTimeframe(event.target.value)} className="w-full rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 outline-none">
-                <option value="M1">1 minute</option>
-                <option value="M3">3 minutes</option>
-                <option value="M5">5 minutes</option>
+                <option value="M1">M1</option>
+                <option value="M5">M5</option>
+                <option value="M15">M15</option>
               </select>
             </label>
-            <div className="space-y-0.5 text-xs">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Live stop rule</span>
-              <p className="rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-800">{form.side === "BUY" ? "Low - 1 tick" : "High + 1 tick"}</p>
-            </div>
+            <p className="pb-1 text-[11px] text-emerald-800">
+              {form.side === "BUY" ? "Buy stop: entry is high + 1 tick, stop is low − 1 tick." : form.side === "SELL" ? "Sell stop: entry is low − 1 tick, stop is high + 1 tick." : "Select Buy or Sell to fill entry and stop from the last completed candle."}
+            </p>
           </div>
-        ) : (
-          <div className="space-y-1">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Order Type</p>
-            <div className="grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1">
-              {["SL", "LIMIT", "MARKET"].map((orderType) => (
-                <button
-                  key={orderType}
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => setForm({
-                    ...form,
-                    order_type: orderType,
-                    cancel_at: orderType === "LIMIT" ? form.cancel_at : "",
-                    conditional_order: orderType === "SL" ? form.conditional_order : false,
-                    trigger_price: orderType === "SL" ? form.trigger_price : "",
-                  })}
-                  className={`rounded-lg px-2 py-1.5 text-[11px] font-semibold transition ${form.order_type === orderType ? "bg-indigo-600 text-white shadow" : "text-slate-500"} ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
-                >
-                  {orderType}
-                </button>
-              ))}
-            </div>
+          <div className="grid grid-cols-4 gap-2 rounded-lg border border-emerald-200 bg-white px-2.5 py-2 font-mono text-[11px] text-slate-800">
+            <span>O {quickQuote ? formatPrice(quickQuote.candle_open, [], 0, quickQuote.price_digits) : "—"}</span>
+            <span>H {quickQuote ? formatPrice(quickQuote.candle_high, [], 0, quickQuote.price_digits) : "—"}</span>
+            <span>L {quickQuote ? formatPrice(quickQuote.candle_low, [], 0, quickQuote.price_digits) : "—"}</span>
+            <span>C {quickQuote ? formatPrice(quickQuote.candle_close, [], 0, quickQuote.price_digits) : "—"}</span>
           </div>
-        )}
+        </div>
         <div className="space-y-2 rounded-xl border border-slate-200 bg-white/90 p-2.5 dark:bg-slate-900">
           <label className="flex items-start gap-2 text-xs text-slate-700">
             <input
@@ -2536,8 +2592,7 @@ function OrderScreen({
               <span className="mt-0.5 block text-[11px] text-slate-500">Book 50% at 4R; close the rest at target, or let it run if no target is set.</span>
             </span>
           </label>
-          {!isQuickOrder && (form.order_type === "LIMIT" || form.order_type === "SL") ? (
-            <label className="flex items-start gap-2 text-xs text-slate-700">
+          <label className="flex items-start gap-2 text-xs text-slate-700">
               <input
                 type="checkbox"
                 className="mt-0.5"
@@ -2561,161 +2616,97 @@ function OrderScreen({
                 <span className="mt-0.5 block text-[11px] text-slate-500">After one clean stop-loss hit, re-place once as an SL order with the same entry, stop, and quantity.</span>
               </span>
             </label>
-          ) : null}
         </div>
-        <div className="grid grid-cols-2 gap-2">
-          <BinarySwitch
-            label="Direction"
-            leftLabel="BUY"
-            rightLabel="SELL"
-            value={form.side}
-            onChange={(value) => setForm({ ...form, side: value })}
-            leftValue="BUY"
-            rightValue="SELL"
-            leftActiveClass="bg-emerald-600 text-white shadow"
-            rightActiveClass="bg-rose-600 text-white shadow"
-            disabled={disabled}
-          />
-          {!isQuickOrder && form.order_type === "SL" ? (
-            <BinarySwitch
-              label="Conditional order"
-              leftLabel="Off"
-              rightLabel="On"
-              value={form.conditional_order ? "ON" : "OFF"}
-              onChange={(value) =>
-                setForm({
-                  ...form,
-                  conditional_order: value === "ON",
-                  trigger_price: value === "ON" ? form.trigger_price : "",
-                })
-              }
-              leftValue="OFF"
-              rightValue="ON"
-              leftActiveClass="bg-slate-600 text-white shadow"
-              rightActiveClass="bg-indigo-600 text-white shadow"
-              disabled={disabled}
-            />
-          ) : (
-            <label className="space-y-0.5 text-xs">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Entry</span>
-              <input
-                className={`w-full rounded-lg border px-2.5 py-1.5 text-xs outline-none disabled:bg-slate-100 ${inputTone(hasVisibleFieldError("entry", touchedFields, submitAttempted) && fieldErrors.entry)}`}
-                placeholder={isMarketOrder ? "Market" : "Entry"}
-                disabled={disabled || isMarketOrder}
-                value={form.entry}
-                step={priceDigits !== null && priceDigits !== undefined ? priceStepForDigits(priceDigits) : "any"}
-                onChange={(e) => setForm({ ...form, entry: e.target.value })}
-                onBlur={() => {
-                  markTouched("entry");
-                  roundPriceField("entry");
-                }}
-              />
-            </label>
-          )}
-        </div>
-        {!isQuickOrder && form.order_type === "SL" && form.conditional_order ? (
-          <label className="space-y-0.5 text-xs">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">When price crosses</span>
-            <input
-              className={`w-full rounded-lg border px-2.5 py-1.5 text-xs outline-none disabled:bg-slate-100 ${inputTone(hasVisibleFieldError("trigger_price", touchedFields, submitAttempted) && fieldErrors.trigger_price)}`}
-              placeholder={form.side === "SELL" ? "Above current price" : "Below current price"}
-              disabled={disabled}
-              value={form.trigger_price}
-              step={priceDigits !== null && priceDigits !== undefined ? priceStepForDigits(priceDigits) : "any"}
-              onChange={(e) => setForm({ ...form, trigger_price: e.target.value })}
-              onBlur={() => {
-                markTouched("trigger_price");
-                roundPriceField("trigger_price");
-              }}
-            />
-            <p className="text-[11px] text-slate-500">
-              {form.side === "SELL"
-                ? "Arms after price trades up through this level, then places the SELL stop (entry must be below trigger)."
-                : "Arms after price trades down through this level, then places the BUY stop (entry must be above trigger)."}
-            </p>
-            {(hasVisibleFieldError("trigger_price", touchedFields, submitAttempted) && fieldErrors.trigger_price) ? (
-              <p className="text-[11px] text-rose-600">{fieldErrors.trigger_price}</p>
+        <BinarySwitch
+          label="Direction"
+          leftLabel="BUY"
+          rightLabel="SELL"
+          value={form.side}
+          onChange={(value) => setForm({ ...form, side: value })}
+          leftValue="BUY"
+          rightValue="SELL"
+          leftActiveClass="bg-emerald-600 text-white shadow"
+          rightActiveClass="bg-rose-600 text-white shadow"
+          disabled={disabled || Boolean(editingOrder?.id)}
+        />
+        {hasVisibleFieldError("side", touchedFields, submitAttempted) && fieldErrors.side ? (
+          <p className="text-[11px] text-rose-600">{fieldErrors.side}</p>
+        ) : null}
+        {form.side === "BUY" || form.side === "SELL" ? (
+          <>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="space-y-0.5 text-xs">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Entry</span>
+                <input
+                  className={`w-full rounded-lg border px-2.5 py-1.5 text-xs outline-none disabled:bg-slate-100 ${inputTone(hasVisibleFieldError("entry", touchedFields, submitAttempted) && fieldErrors.entry)}`}
+                  placeholder="Entry"
+                  disabled={disabled || editingOpenPosition}
+                  value={form.entry}
+                  step={priceDigits !== null && priceDigits !== undefined ? priceStepForDigits(priceDigits) : "any"}
+                  onChange={(e) => {
+                    userEditedPricesRef.current = true;
+                    setForm({ ...form, entry: e.target.value });
+                  }}
+                  onBlur={() => {
+                    markTouched("entry");
+                    roundPriceField("entry");
+                  }}
+                />
+              </label>
+              <label className="space-y-0.5 text-xs">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Stop Loss</span>
+                <input
+                  className={`w-full rounded-lg border px-2.5 py-1.5 text-xs outline-none disabled:bg-slate-100 ${inputTone(hasVisibleFieldError("stop_loss", touchedFields, submitAttempted) && fieldErrors.stop_loss)}`}
+                  placeholder="Stop"
+                  disabled={disabled}
+                  value={form.stop_loss}
+                  step={priceDigits !== null && priceDigits !== undefined ? priceStepForDigits(priceDigits) : "any"}
+                  onChange={(e) => {
+                    userEditedPricesRef.current = true;
+                    setForm({ ...form, stop_loss: e.target.value });
+                  }}
+                  onBlur={() => {
+                    markTouched("stop_loss");
+                    roundPriceField("stop_loss");
+                  }}
+                />
+              </label>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-0.5 text-xs">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">SL pips</span>
+                <p className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 font-semibold text-slate-800">
+                  {preview?.sl_pips == null && quickQuote?.sl_pips == null
+                    ? "—"
+                    : formatDistanceValue(form.symbol, preview?.sl_pips ?? quickQuote?.sl_pips)}
+                </p>
+              </div>
+              <label className="space-y-0.5 text-xs">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Target</span>
+                <input
+                  className={`w-full rounded-lg border px-2.5 py-1.5 text-xs outline-none disabled:bg-slate-100 ${inputTone(hasVisibleFieldError("target", touchedFields, submitAttempted) && fieldErrors.target)}`}
+                  placeholder="Optional"
+                  disabled={disabled}
+                  value={form.target}
+                  step={priceDigits !== null && priceDigits !== undefined ? priceStepForDigits(priceDigits) : "any"}
+                  onChange={(e) => setForm({ ...form, target: e.target.value })}
+                  onBlur={() => {
+                    markTouched("target");
+                    roundPriceField("target");
+                  }}
+                />
+              </label>
+            </div>
+            {form.target ? (
+              <p className="rounded-lg border border-indigo-100 bg-indigo-50 px-2.5 py-2 text-[11px] text-slate-700">
+                <span className="font-semibold uppercase tracking-wide text-slate-500">RR </span>
+                <span className="font-bold text-slate-900">{preview?.rr_ratio ?? "—"}</span>
+              </p>
             ) : null}
-          </label>
+          </>
         ) : null}
-        {!isQuickOrder && form.order_type === "SL" ? (
-          <label className="space-y-0.5 text-xs">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Entry</span>
-            <input
-              className={`w-full rounded-lg border px-2.5 py-1.5 text-xs outline-none disabled:bg-slate-100 ${inputTone(hasVisibleFieldError("entry", touchedFields, submitAttempted) && fieldErrors.entry)}`}
-              placeholder="Entry"
-              disabled={disabled}
-              value={form.entry}
-              step={priceDigits !== null && priceDigits !== undefined ? priceStepForDigits(priceDigits) : "any"}
-              onChange={(e) => setForm({ ...form, entry: e.target.value })}
-              onBlur={() => {
-                markTouched("entry");
-                roundPriceField("entry");
-              }}
-            />
-          </label>
-        ) : null}
-        {(hasVisibleFieldError("entry", touchedFields, submitAttempted) && fieldErrors.entry) && (
+        {hasVisibleFieldError("entry", touchedFields, submitAttempted) && fieldErrors.entry && (
           <p className="text-[11px] text-rose-600">{fieldErrors.entry}</p>
-        )}
-        <div className={`grid gap-2 ${isQuickOrder ? "grid-cols-1" : "grid-cols-2"}`}>
-          <label className="space-y-0.5 text-xs">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{isQuickOrder ? "Live Stop Loss" : "Stop Loss"}</span>
-            <input
-              className={`w-full rounded-lg border px-2.5 py-1.5 text-xs outline-none disabled:bg-slate-100 ${inputTone(hasVisibleFieldError("stop_loss", touchedFields, submitAttempted) && fieldErrors.stop_loss)}`}
-              placeholder="Stop"
-              disabled={disabled || isQuickOrder}
-              value={form.stop_loss}
-              step={priceDigits !== null && priceDigits !== undefined ? priceStepForDigits(priceDigits) : "any"}
-              onChange={(e) => setForm({ ...form, stop_loss: e.target.value })}
-              onBlur={() => {
-                markTouched("stop_loss");
-                roundPriceField("stop_loss");
-              }}
-            />
-          </label>
-          {!isQuickOrder && <label className="space-y-0.5 text-xs">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Target</span>
-            <input
-              className={`w-full rounded-lg border px-2.5 py-1.5 text-xs outline-none disabled:bg-slate-100 ${inputTone(hasVisibleFieldError("target", touchedFields, submitAttempted) && fieldErrors.target)}`}
-              placeholder="Optional"
-              disabled={disabled}
-              value={form.target}
-              step={priceDigits !== null && priceDigits !== undefined ? priceStepForDigits(priceDigits) : "any"}
-              onChange={(e) => setForm({ ...form, target: e.target.value })}
-              onBlur={() => {
-                markTouched("target");
-                roundPriceField("target");
-              }}
-            />
-          </label>}
-        </div>
-        {!isQuickOrder && form.order_type === "LIMIT" ? (
-          <label className="space-y-0.5 text-xs">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Cancel At</span>
-            <input
-              className={`w-full rounded-lg border px-2.5 py-1.5 text-xs outline-none disabled:bg-slate-100 ${inputTone(hasVisibleFieldError("cancel_at", touchedFields, submitAttempted) && fieldErrors.cancel_at)}`}
-              placeholder={form.side === "BUY" ? "Above entry (optional)" : "Below entry (optional)"}
-              disabled={disabled}
-              value={form.cancel_at}
-              step={priceDigits !== null && priceDigits !== undefined ? priceStepForDigits(priceDigits) : "any"}
-              onChange={(e) => setForm({ ...form, cancel_at: e.target.value })}
-              onBlur={() => {
-                markTouched("cancel_at");
-                roundPriceField("cancel_at");
-              }}
-            />
-            {(hasVisibleFieldError("cancel_at", touchedFields, submitAttempted) && fieldErrors.cancel_at) ? (
-              <p className="text-[11px] text-rose-600">{fieldErrors.cancel_at}</p>
-            ) : (
-              <p className="text-[11px] text-slate-500">If price taps this level before fill, the pending LIMIT is cancelled.</p>
-            )}
-          </label>
-        ) : null}
-        {isQuickOrder && (
-          <p className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 font-mono text-[11px] text-slate-600">
-            {quickQuote ? `Completed candle H ${formatPrice(quickQuote.candle_high, [], 0, quickQuote.price_digits)} / L ${formatPrice(quickQuote.candle_low, [], 0, quickQuote.price_digits)} · ${quickQuote.timeframe}` : "Loading the last completed candle and live quote..."}
-          </p>
         )}
         {hasVisibleFieldError("stop_loss", touchedFields, submitAttempted) && fieldErrors.stop_loss && (
           <p className="text-[11px] text-rose-600">{fieldErrors.stop_loss}</p>
@@ -2761,7 +2752,7 @@ function OrderScreen({
                   <input
                     type="checkbox"
                     checked={isChecked}
-                    disabled={selectionDisabled}
+                    disabled={selectionDisabled || Boolean(editingOrder?.id)}
                     onChange={(e) => {
                       markTouched("targets");
                       setSelectedTargetIds((current) => {
@@ -2799,7 +2790,7 @@ function OrderScreen({
                     <input
                       type="number"
                       min="1"
-                      disabled={!isChecked}
+                      disabled={!isChecked || editingOpenPosition}
                       className="w-full rounded-lg border border-slate-300 px-2 py-1 text-xs outline-none focus:border-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-100"
                       value={riskInputs[account.id] ?? ""}
                       onChange={(e) => setRiskInputs((current) => ({ ...current, [account.id]: e.target.value }))}
@@ -2811,7 +2802,9 @@ function OrderScreen({
                 <div className="space-y-0.5 text-xs">
                   <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Qty</span>
                   <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 font-semibold text-slate-800">
-                    {isChecked ? (previewItem ? formatQty(previewItem.quantity) : "—") : "Not selected"}
+                    {editingOpenPosition && isChecked
+                      ? formatQty(editingOrder.position_quantity ?? editingOrder.quantity)
+                      : isChecked ? (previewItem ? formatQty(previewItem.quantity) : "—") : "Not selected"}
                   </div>
                 </div>
                 </div>
@@ -2845,9 +2838,9 @@ function OrderScreen({
           Preview unavailable: {previewError}
         </div>
       )}
-      {isQuickOrder && quickQuoteError && (
+      {quickQuoteError && (
         <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
-          Quick Order quote unavailable: {quickQuoteError}
+          Candle quote unavailable: {quickQuoteError}
         </div>
       )}
       {submitAttempted && formError && (
@@ -2856,24 +2849,12 @@ function OrderScreen({
         </div>
       )}
       <div className="mt-2 space-y-2">
-        {!isQuickOrder && <button
-          type="button"
-          onClick={() => {
-            setDetectorOpen(true);
-            setDetectorError("");
-            setDetectorResult(null);
-          }}
-          disabled={disabled}
-          className="w-full rounded-xl border border-indigo-200 bg-white px-4 py-2 text-xs font-bold text-indigo-700 shadow-sm hover:bg-indigo-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
-        >
-          Candle Detector
-        </button>}
         <button
           onClick={placeOrder}
           disabled={hasValidationErrors || placingOrder}
           className="w-full rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
         >
-          {placingOrder ? "Submitting..." : isQuickOrder ? `Quick ${titleCaseWord(form.side)} Market Order` : `Place ${titleCaseWord(effectiveOrderType)} ${titleCaseWord(form.side)} Order`}
+          {placingOrder ? "Submitting..." : editingOrder?.id ? "Update Order" : `Place SL ${form.side === "SELL" ? "Sell" : form.side === "BUY" ? "Buy" : ""} Order`}
         </button>
       </div>
       {detectorOpen && (

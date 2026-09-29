@@ -51,8 +51,8 @@ from .schemas import (
     OrderTargetIn,
     QuickOrderIn,
     QuickOrderPreviewOut,
+    OrderHistoryPageOut,
     PaginatedBrokerTradeHistoryOut,
-    PaginatedOrdersOut,
     RegisterIn,
     RiskPreviewOut,
     RiskPreviewTargetOut,
@@ -3694,25 +3694,42 @@ async def get_broker_trade_history(
     )
 
 
-@app.get("/orders/history", response_model=PaginatedOrdersOut)
+def _order_history_sort_key(doc: dict):
+    created = doc.get("created_at") or datetime.min
+    return (created, str(doc.get("_id") or ""))
+
+
+def _order_history_cursor(doc: dict) -> str:
+    created = doc.get("created_at") or datetime.min
+    stamp = created.isoformat() if isinstance(created, datetime) else str(created)
+    return f"{stamp}|{doc.get('_id')}"
+
+
+@app.get("/orders/history", response_model=OrderHistoryPageOut)
 async def get_order_history(
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=10, ge=1, le=100),
+    limit: int = Query(default=20, ge=1, le=100),
+    cursor: Optional[str] = None,
     user=Depends(get_current_user),
     db=Depends(get_db),
 ):
     today_start_utc, _ = _today_utc_range()
-    query = {"user_id": user["_id"], "created_at": {"$lt": today_start_utc}}
-    total = await db.orders.count_documents_async(query)
-    skip = (page - 1) * page_size
-    docs = await db.orders.find_async(query)
-    docs.sort(key=lambda doc: doc.get("created_at") or datetime.min, reverse=True)
-    docs = docs[skip:skip + page_size]
-    return PaginatedOrdersOut(
-        records=[_order_row_out(doc) for doc in docs],
-        page=page,
-        page_size=page_size,
-        total=total,
+    docs = await db.orders.find_async({"user_id": user["_id"], "created_at": {"$lt": today_start_utc}})
+    docs.sort(key=_order_history_sort_key, reverse=True)
+    if cursor:
+        cursor_id = cursor.split("|", 1)[-1]
+        start = 0
+        for index, doc in enumerate(docs):
+            if str(doc.get("_id")) == cursor_id:
+                start = index + 1
+                break
+        else:
+            raise HTTPException(status_code=400, detail="History cursor is not valid.")
+        docs = docs[start:]
+    page = docs[:limit]
+    next_cursor = _order_history_cursor(page[-1]) if len(docs) > limit and page else None
+    return OrderHistoryPageOut(
+        records=[_order_row_out(doc) for doc in page],
+        next_cursor=next_cursor,
     )
 
 
@@ -4354,7 +4371,9 @@ async def create_order(data: OrderCreateIn, user=Depends(get_current_user), db=D
 
 @app.post("/orders/quick", response_model=OrderPlacementOut)
 async def create_quick_order(data: QuickOrderIn, user=Depends(get_current_user), db=Depends(get_db)):
-    """Rebuild the live candle stop and market entry immediately before placement."""
+    """Place an SL order from the last completed candle. The desk sends edited prices via POST /orders."""
+    if str(data.side or "").upper() not in {"BUY", "SELL"}:
+        raise HTTPException(status_code=400, detail="Direction must be BUY or SELL.")
     account, symbol = await _quick_order_feed_account(data, user, db)
     try:
         quote = await build_quick_order_quote(account, symbol, data.timeframe, data.side)
@@ -4363,8 +4382,8 @@ async def create_quick_order(data: QuickOrderIn, user=Depends(get_current_user),
     return await create_order(
         OrderCreateIn(
             symbol=data.symbol,
-            order_type="MARKET",
-            side=data.side.upper(),
+            order_type="SL",
+            side=str(data.side).upper(),
             entry=quote["entry"],
             stop_loss=quote["stop_loss"],
             comment=data.comment,
@@ -4554,6 +4573,70 @@ async def decline_order_market_open_defer(order_id: str, user=Depends(get_curren
     return {"ok": True, "order_id": str(order_oid), "status": "FAILED"}
 
 
+async def _modify_open_position_sltp(db, user: dict, order: dict, order_oid, data: OrderModifyIn):
+    """Update stop and target on an open position. Quantity stays at the filled size."""
+    existing_qty = round(float(order.get("position_quantity") or order.get("quantity") or 0), 2)
+    if data.quantity is not None and round(float(data.quantity), 2) != existing_qty:
+        raise HTTPException(status_code=400, detail="Quantity stays fixed while the position is open.")
+
+    side = str(order.get("side") or "").upper()
+    entry = float(order.get("entry") or 0)
+    stop_loss = float(data.stop_loss)
+    target = data.target
+    if stop_loss <= 0:
+        raise HTTPException(status_code=400, detail="Stop loss must be a positive number")
+    if side == "BUY" and stop_loss >= entry:
+        raise HTTPException(status_code=400, detail="For BUY, stop loss must be below entry")
+    if side == "SELL" and stop_loss <= entry:
+        raise HTTPException(status_code=400, detail="For SELL, stop loss must be above entry")
+    if target is not None:
+        if side == "BUY" and float(target) <= entry:
+            raise HTTPException(status_code=400, detail="For BUY, target must be above entry")
+        if side == "SELL" and float(target) >= entry:
+            raise HTTPException(status_code=400, detail="For SELL, target must be below entry")
+
+    position_id = str(order.get("meta_position_id") or "").strip()
+    if not position_id:
+        raise HTTPException(status_code=400, detail="Open position ticket is missing.")
+
+    account = _get_order_account(order, user["_id"], db)
+    broker_info = _broker_info_from_account(account)
+    _, new_stop, new_target = await _normalize_order_prices(
+        account,
+        order["symbol"],
+        entry,
+        stop_loss,
+        target,
+    )
+    await metaapi_service.modify_position(
+        account["api_token"],
+        account["account_id"],
+        position_id,
+        stop_loss=new_stop,
+        take_profit=float(new_target) if new_target is not None else 0,
+    )
+    update_fields = {
+        "stop_loss": new_stop,
+        "target": new_target,
+        "updated_at": datetime.utcnow(),
+    }
+    await db.orders.update_one_async({"_id": order_oid}, {"$set": update_fields})
+    updated_order = {**order, **update_fields}
+    _save_event(
+        db,
+        user["_id"],
+        order_oid,
+        "ORDER_MODIFIED",
+        str(order.get("status") or ""),
+        append_order_log_prices(f"{order['symbol']} open position stop and target updated", updated_order),
+        merge_order_log_payload(source=updated_order),
+        symbol=order["symbol"],
+        broker_info=broker_info,
+    )
+    await live_state_hub.push_snapshot(db, str(user["_id"]))
+    return {"ok": True}
+
+
 @app.post("/orders/{order_id}/modify")
 async def modify_order(order_id: str, data: OrderModifyIn, user=Depends(get_current_user), db=Depends(get_db)):
     try:
@@ -4564,8 +4647,10 @@ async def modify_order(order_id: str, data: OrderModifyIn, user=Depends(get_curr
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     status = str(order.get("status") or "").upper()
+    if status in {"FILLED", "POSITION_OPEN", "PARTIALLY_CLOSED"}:
+        return await _modify_open_position_sltp(db, user, order, order_oid, data)
     if status not in {"PENDING", "PLACEMENT_PENDING", "WAITING_TRIGGER", DEFERRED_MARKET_OPEN_STATUS}:
-        raise HTTPException(status_code=400, detail="Only pending orders can be modified")
+        raise HTTPException(status_code=400, detail="Only pending orders or open positions can be modified")
 
     account = _get_order_account(order, user["_id"], db)
     broker_info = _broker_info_from_account(account)
