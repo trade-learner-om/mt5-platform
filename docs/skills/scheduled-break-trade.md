@@ -1,5 +1,7 @@
 # Scheduled Break Trade
 
+**Removed.** Do not restore this runtime. See `docs/skills/automation.md`.
+
 ## Purpose
 
 Watch an M1/M5/M15 close past a user level, arm on the next valid red/green candle, place an SL (with primary SL→LIMIT fallback on Invalid price), optionally re-place the same SL once after a clean stop-out, and persist the full primary + `RETRY_*` lifecycle on one `scheduled_trades` document.

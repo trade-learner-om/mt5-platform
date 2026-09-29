@@ -232,7 +232,6 @@ database.orders.create_index(
 database.order_events.create_index([("order_id", ASCENDING), ("event_ts_ist", ASCENDING)])
 database.order_events.create_index([("run_id", ASCENDING), ("strategy_type", ASCENDING), ("event_ts_ist", ASCENDING)])
 database.strategy_results.create_index([("user_id", ASCENDING), ("strategy_type", ASCENDING), ("created_at", DESCENDING)])
-database.master_break_runs.create_index([("user_id", ASCENDING), ("status", ASCENDING), ("updated_at", DESCENDING)])
 database.notifications.create_index([("user_id", ASCENDING), ("created_at", ASCENDING)])
 database.notifications.create_index([("user_id", ASCENDING), ("category", ASCENDING), ("created_at", ASCENDING)])
 database.notifications.create_index([("user_id", ASCENDING), ("status", ASCENDING), ("created_at", ASCENDING)])

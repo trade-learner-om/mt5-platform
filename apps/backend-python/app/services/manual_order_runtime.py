@@ -30,11 +30,7 @@ def _manual_context(order: dict) -> dict:
 
 
 def _is_strategy_owned_order(order: dict) -> bool:
-    if order.get("trap_reversal_run_id"):
-        return True
     if order.get("planner_context"):
-        return True
-    if order.get("scheduled_trade_id"):
         return True
     if order.get("dry_run"):
         return True

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
 import ActivePositions from "./ActivePositions";
-import FSMCommandCenter from "./FSMCommandCenter";
 import LiveWatchlist from "./LiveWatchlist";
 import { resolveSymbolPriceDigits } from "../../utils/pricePrecision";
 
@@ -135,15 +134,7 @@ export default function TerminalDashboard({
         />
       </div>
 
-      <div className="grid min-h-0 gap-3 xl:grid-cols-[minmax(0,5fr)_minmax(0,3fr)]">
-        <FSMCommandCenter
-          token={token}
-          selectedAccountExists={selectedAccountExists}
-          onNotify={onNotify}
-          livePrices={livePrices}
-          symbolPriceDigits={symbolPriceDigits}
-          selectedInstrument={selectedInstrument}
-        />
+      <div className="min-h-0">
         {OrderScreenComponent ? (
           <OrderScreenComponent
             token={token}

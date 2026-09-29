@@ -1,5 +1,7 @@
 # Master Break
 
+**Removed.** Do not restore this runtime. See `docs/skills/automation.md`.
+
 ## Purpose
 
 Document Master Break: international XAUUSD/GOLD dual-side break strategy with live FSM and backtest.

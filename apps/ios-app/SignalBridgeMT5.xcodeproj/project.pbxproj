@@ -21,7 +21,6 @@
 		A1000000000000000000000C /* LocalNetworkAuthorizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000D /* LocalNetworkAuthorizer.swift */; };
 		A1000000000000000000000D /* PingResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000E /* PingResult.swift */; };
 		A1000000000000000000000E /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000F /* AppConfig.swift */; };
-		A1000000000000000000000F /* StrategyViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* StrategyViews.swift */; };
 		A10000000000000000000010 /* BacktestResultsPaginationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* BacktestResultsPaginationView.swift */; };
 /* End PBXBuildFile section */
 
@@ -41,7 +40,6 @@
 		A2000000000000000000000D /* LocalNetworkAuthorizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalNetworkAuthorizer.swift; sourceTree = "<group>"; };
 		A2000000000000000000000E /* PingResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PingResult.swift; sourceTree = "<group>"; };
 		A2000000000000000000000F /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
-		A20000000000000000000010 /* StrategyViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrategyViews.swift; sourceTree = "<group>"; };
 		A20000000000000000000011 /* BacktestResultsPaginationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BacktestResultsPaginationView.swift; sourceTree = "<group>"; };
 		A30000000000000000000001 /* SignalBridgeMT5.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SignalBridgeMT5.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -81,7 +79,6 @@
 				A2000000000000000000000D /* LocalNetworkAuthorizer.swift */,
 				A2000000000000000000000E /* PingResult.swift */,
 				A2000000000000000000000F /* AppConfig.swift */,
-				A20000000000000000000010 /* StrategyViews.swift */,
 				A20000000000000000000011 /* BacktestResultsPaginationView.swift */,
 				A2000000000000000000000B /* Info.plist */,
 				A2000000000000000000000C /* Assets.xcassets */,
@@ -179,7 +176,6 @@
 				A1000000000000000000000C /* LocalNetworkAuthorizer.swift in Sources */,
 				A1000000000000000000000D /* PingResult.swift in Sources */,
 				A1000000000000000000000E /* AppConfig.swift in Sources */,
-				A1000000000000000000000F /* StrategyViews.swift in Sources */,
 				A10000000000000000000010 /* BacktestResultsPaginationView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

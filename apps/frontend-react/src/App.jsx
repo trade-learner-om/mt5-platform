@@ -1,17 +1,13 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, AlarmClock, Crosshair, Layers, List, Settings, Workflow } from "lucide-react";
+import { Activity, List, Settings } from "lucide-react";
 import { api, openLiveSocket, liveSnapshotHasFreshPrices, pingBackendHealth, WS_LIVE_STALE_MS } from "./api";
 import AppShell from "./components/layout/AppShell";
 import ManageAccountModal from "./components/ManageAccountModal";
 import SymbolIcon from "./components/SymbolIcon";
-import TrapReversalDashboard from "./pages/TrapReversalDashboard";
-import MasterBreakDashboard from "./pages/MasterBreakDashboard";
 import InternationalMarketWorkspace from "./components/market/InternationalMarketWorkspace";
 import IndianMarketWorkspace from "./components/market/IndianMarketWorkspace";
 import IndianSessionModal from "./components/indian/IndianSessionModal";
 import SettingsTerminalPage from "./components/terminal/SettingsTerminalPage";
-import ScheduledTradePanel from "./components/scheduled-trade/ScheduledTradePanel";
-import UnmitigatedSwingsPanel from "./components/structure/UnmitigatedSwingsPanel";
 import {
   decimalPlaces,
   formatPriceWithDigits,
@@ -7110,7 +7106,6 @@ export default function App() {
   const [liveOrders, setLiveOrders] = useState([]);
   const [liveWatchlist, setLiveWatchlist] = useState([]);
   const [livePrices, setLivePrices] = useState({});
-  const [liveScheduledTrades, setLiveScheduledTrades] = useState([]);
   const [symbolPriceDigits, setSymbolPriceDigits] = useState({});
   const [indianMarketOverview, setIndianMarketOverview] = useState({ status: "CLOSED", indices: [], watchlist: [] });
   const [notifications, setNotifications] = useState([]);
@@ -7156,10 +7151,6 @@ export default function App() {
   const shellNavItems = useMemo(
     () => ([
       { id: "trading", label: "Watchlist", shortLabel: "Watch", icon: List },
-      { id: "trap-reversal", label: "FSM Engines", shortLabel: "FSM", icon: Workflow },
-      { id: "master-break", label: "Master Break", shortLabel: "MB", icon: Crosshair },
-      { id: "scheduled-trade", label: "Scheduled Trade", shortLabel: "Sched", icon: AlarmClock },
-      { id: "unmitigated-swings", label: "Unmitigated Swings", shortLabel: "Swings", icon: Layers },
       { id: "positions", label: "Positions", shortLabel: "Pos", icon: Activity },
       { id: "settings", label: "Settings", shortLabel: "Set", icon: Settings },
     ]),
@@ -7240,7 +7231,6 @@ export default function App() {
     setLiveOrders([]);
     setLiveWatchlist([]);
     setLivePrices({});
-    setLiveScheduledTrades([]);
     setSymbolPriceDigits({});
     setIndianMarketOverview({ status: "CLOSED", indices: [], watchlist: [] });
     setNotifications([]);
@@ -7435,9 +7425,6 @@ export default function App() {
         setLiveOrders(normalizeLiveOrders(payload.orders || []));
         setLiveWatchlist((current) => mergeWatchlistPrices(current, payload.watchlist || []));
         setLivePrices((current) => mergeLivePrices(current, payload.prices || {}));
-        if (Array.isArray(payload.scheduled_trades)) {
-          setLiveScheduledTrades(payload.scheduled_trades);
-        }
         setSymbolPriceDigits((current) => mergeSymbolPriceDigits(current, payload.prices || {}, payload.watchlist || []));
         setIndianMarketOverview(payload.indian_market || { status: "CLOSED", indices: [], watchlist: [] });
         if (payload.notifications) {
@@ -7615,10 +7602,6 @@ export default function App() {
       const orderedPages = [
         "trading",
         "positions",
-        "trap-reversal",
-        "master-break",
-        "scheduled-trade",
-        "unmitigated-swings",
         "settings",
         "trade-planner",
         ...(current.is_admin ? ["admin"] : []),
@@ -7997,108 +7980,6 @@ export default function App() {
                 onNotify={notify}
               />
             </div>
-          )
-        ) : currentPage === "trap-reversal" ? (
-          isIndianMarket ? (
-            <main className="min-h-0 flex-1 overflow-auto">
-              <section className="terminal-panel">
-                <p className="text-sm font-semibold uppercase tracking-[0.24em] text-indigo-600">Trap Reversal</p>
-                <h2 className="mt-2 text-2xl font-bold text-[color:var(--text-strong)]">International MT5 only</h2>
-                <p className="mt-3 max-w-2xl text-sm text-[color:var(--text-muted)]">
-                  Trap reversal runs only on international MT5 accounts with broker candle history and live tick access.
-                </p>
-              </section>
-            </main>
-          ) : (
-            <main className="min-h-0 flex-1 overflow-auto">
-              <TrapReversalDashboard
-                token={token}
-                selectedAccountExists={selectedAccountExists}
-                onNotify={notify}
-              />
-            </main>
-          )
-        ) : currentPage === "master-break" ? (
-          isIndianMarket ? (
-            <main className="min-h-0 flex-1 overflow-auto">
-              <section className="terminal-panel">
-                <p className="text-sm font-semibold uppercase tracking-[0.24em] text-indigo-600">Master Break</p>
-                <h2 className="mt-2 text-2xl font-bold text-[color:var(--text-strong)]">International MT5 only</h2>
-                <p className="mt-3 max-w-2xl text-sm text-[color:var(--text-muted)]">
-                  Master Break runs only on international MT5 accounts for XAUUSD/GOLD with broker candle history and live ticks.
-                </p>
-              </section>
-            </main>
-          ) : (
-            <main className="min-h-0 flex-1 overflow-auto">
-              <MasterBreakDashboard
-                token={token}
-                selectedAccountExists={selectedAccountExists}
-                onNotify={notify}
-              />
-            </main>
-          )
-        ) : currentPage === "scheduled-trade" ? (
-          isIndianMarket ? (
-            <main className="min-h-0 flex-1 overflow-auto">
-              <section className="terminal-panel">
-                <p className="text-sm font-semibold uppercase tracking-[0.24em] text-indigo-600">Scheduled Trade</p>
-                <h2 className="mt-2 text-2xl font-bold text-[color:var(--text-strong)]">International MT5 only</h2>
-                <p className="mt-3 max-w-2xl text-sm text-[color:var(--text-muted)]">
-                  Scheduled Break Trade watches an M1/M5/M15 close past your level, then arms on the next valid red/green candle before placing an SL.
-                </p>
-              </section>
-            </main>
-          ) : (
-            <main className="min-h-0 flex-1 overflow-auto p-4">
-              <section className="mb-4">
-                <p className="text-sm font-semibold uppercase tracking-[0.24em] text-indigo-600">Scheduled Trade</p>
-                <h2 className="mt-2 text-2xl font-bold text-[color:var(--text-strong)]">Break level → signal candle → SL</h2>
-                <p className="mt-2 max-w-3xl text-sm text-[color:var(--text-muted)]">
-                  Set a price and timeframe on the selected international account. Level above live mid is short; below is long.
-                  After a close past the level, the next valid red (short) or green (long) candle places the stop order.
-                </p>
-              </section>
-              <ScheduledTradePanel
-                token={token}
-                accounts={internationalAccounts}
-                activeAccountId={me?.selected_account_id || ""}
-                livePrices={livePrices}
-                liveScheduledTrades={liveScheduledTrades}
-                subscribeLiveSymbol={subscribeLiveSymbol}
-                onNotify={notify}
-              />
-            </main>
-          )
-        ) : currentPage === "unmitigated-swings" ? (
-          isIndianMarket ? (
-            <main className="min-h-0 flex-1 overflow-auto">
-              <section className="terminal-panel">
-                <p className="text-sm font-semibold uppercase tracking-[0.24em] text-indigo-600">Unmitigated Swings</p>
-                <h2 className="mt-2 text-2xl font-bold text-[color:var(--text-strong)]">International MT5 only</h2>
-                <p className="mt-3 max-w-2xl text-sm text-[color:var(--text-muted)]">
-                  Structure swings analysis and M1 break automation require an international MT5 account.
-                </p>
-              </section>
-            </main>
-          ) : (
-            <main className="min-h-0 flex-1 overflow-auto p-4">
-              <section className="mb-4">
-                <p className="text-sm font-semibold uppercase tracking-[0.24em] text-indigo-600">Unmitigated Swings</p>
-                <h2 className="mt-2 text-2xl font-bold text-[color:var(--text-strong)]">Structure → M1 break automation</h2>
-                <p className="mt-2 max-w-3xl text-sm text-[color:var(--text-muted)]">
-                  Analyze H4/H1/M15 unmitigated highs and lows, then Execute Automation to arm one-shot M1 Scheduled Break
-                  trades. Taken-out levels mark Mitigated. Target is 4R or the prior structure candle extreme, whichever is farther.
-                </p>
-              </section>
-              <UnmitigatedSwingsPanel
-                token={token}
-                accounts={internationalAccounts}
-                activeAccountId={me?.selected_account_id || ""}
-                liveScheduledTrades={liveScheduledTrades}
-                onNotify={notify}
-              />
-            </main>
           )
         ) : currentPage === "settings" ? (
           <main className="min-h-0 flex-1 overflow-hidden">

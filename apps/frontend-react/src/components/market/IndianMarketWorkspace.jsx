@@ -1,5 +1,3 @@
-import IndianStrategyBuilder from "../indian/IndianStrategyBuilder";
-import IndianPeCycleBacktestPanel from "../indian/IndianPeCycleBacktestPanel";
 import IndianWatchlist from "../indian/IndianWatchlist";
 
 function formatInr(value) {
@@ -134,12 +132,6 @@ export default function IndianMarketWorkspace({
                   : "Connect the session to start live market data."}
               </div>
             </section>
-            <IndianPeCycleBacktestPanel
-              token={token}
-              selectedAccount={selectedAccount}
-              onNotify={onNotify}
-            />
-            <IndianStrategyBuilder token={token} selectedAccount={selectedAccount} />
           </>
         )}
       </main>

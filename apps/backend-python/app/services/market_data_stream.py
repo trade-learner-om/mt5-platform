@@ -28,9 +28,6 @@ from .m1_candle_builder import m1_candle_builder
 from .deferred_market_open import process_due_deferred_orders
 from .risk import digits_from_symbol_spec, normalize_price_to_symbol
 from .symbol_resolver import normalize_symbol, resolve_broker_symbol
-from .master_break_runtime import master_break_manager
-from .scheduled_trade_runtime import scheduled_trade_manager
-from .trap_reversal_automation import trap_reversal_manager
 from .trade_planner_runtime import trade_planner_runtime_manager
 
 logger = logging.getLogger(__name__)
@@ -98,14 +95,6 @@ def _restore_running_user_ids(db) -> set[str]:
             {"auto_execution_enabled": True, "status": "RUNNING"},
             {"user_id": 1},
         )
-    )
-    user_ids.update(
-        str(doc["user_id"])
-        for doc in db["master_break_runs"].find(
-            {"status": "RUNNING"},
-            {"user_id": 1},
-        )
-        if doc.get("user_id") is not None
     )
     return user_ids
 
@@ -280,28 +269,10 @@ class MarketDataStreamManager:
                     stale_seconds = (now - started_at).total_seconds()
                 stale_primary = stale_seconds is not None and stale_seconds > 45
 
-            # New strategy symbols (e.g. Trend Pilot close-mode) must be subscribed even when
-            # the primary session already looks healthy on other instruments.
-            uncovered_strategy_symbols = False
-            if primary and primary.get("kind") == "primary" and not needs_setup and not stale_primary:
-                required = set(trap_reversal_manager.active_symbols(str(user_id), None) or set())
-                required |= set(master_break_manager.active_symbols(str(user_id), None) or set())
-                required |= set(scheduled_trade_manager.active_symbols(str(user_id), None) or set())
-                try:
-                    user_oid = ObjectId(user_id)
-                    required |= set(scheduled_trade_manager.active_symbols_from_db(db, user_oid, None) or set())
-                except Exception:
-                    pass
-                primary_symbols = {normalize_symbol(symbol) for symbol in (primary.get("symbols") or [])}
-                uncovered_strategy_symbols = bool(
-                    {normalize_symbol(symbol) for symbol in required if str(symbol or "").strip()} - primary_symbols
-                )
-
             if (
                 not force
                 and not needs_setup
                 and not stale_primary
-                and not uncovered_strategy_symbols
                 and self.stream_refresh_is_debounced(user_id)
             ):
                 logger.debug("Skipping debounced live stream refresh | user=%s", user_id)
@@ -445,18 +416,11 @@ class MarketDataStreamManager:
         watchlist_symbols = symbol_groups["watchlist_symbols"]
         planner_symbols = symbol_groups["planner_symbols"]
         active_trade_symbols = symbol_groups["active_trade_symbols"]
-        trap_symbols = trap_reversal_manager.active_symbols(str(user_oid), account["_id"])
-        master_break_symbols = master_break_manager.active_symbols(str(user_oid), account["_id"])
-        scheduled_trade_symbols = set(scheduled_trade_manager.active_symbols(str(user_oid), account["_id"]) or set())
-        scheduled_trade_symbols |= set(await run_sync(scheduled_trade_manager.active_symbols_from_db, db, user_oid, account["_id"]) or set())
         manual_order_symbols = await run_sync(manual_order_runtime_manager.active_symbols, db, user_oid, account["_id"])
         requested_symbols = sorted(
             watchlist_symbols
             | planner_symbols
             | active_trade_symbols
-            | trap_symbols
-            | master_break_symbols
-            | scheduled_trade_symbols
             | manual_order_symbols
             | self._extra_symbols.get(user_id, set())
         )
@@ -954,22 +918,8 @@ class MarketDataStreamManager:
                 session["account"] = account
             if reconciled and account:
                 await run_coro_in_thread(manual_order_runtime_manager.handle_post_reconcile, session["db"], user_id, account)
-                await scheduled_trade_manager.sync_linked_orders(session["db"], ObjectId(user_id) if not isinstance(user_id, ObjectId) else user_id, account)
             if account_db_id and account and session.get("kind") == "primary":
                 await run_sync(m1_candle_builder.handle_tick, session["db"], user_id, account, price, tick_time)
-                await trap_reversal_manager.handle_price(price.get("symbol") or "", price)
-                await master_break_manager.handle_price(
-                    price.get("symbol") or "",
-                    price,
-                    db=session.get("db"),
-                )
-                await scheduled_trade_manager.handle_price(
-                    price.get("symbol") or "",
-                    price,
-                    db=session.get("db"),
-                    account=account,
-                    user_id=str(user_id),
-                )
                 await run_coro_in_thread(manual_order_runtime_manager.handle_tick, session["db"], user_id, account, price, tick_time)
                 await process_due_deferred_orders(session["db"], user_id, account)
             if account:
@@ -1078,8 +1028,6 @@ class MarketDataStreamManager:
         for account_id in active_order_accounts:
             if account_id:
                 account_ids.add(account_id)
-        account_ids.update(trap_reversal_manager.active_account_ids(str(user_oid)))
-        account_ids.update(master_break_manager.active_account_ids(str(user_oid)))
         return account_ids
 
     def _required_execution_symbols(self, db, user_oid: ObjectId, account_db_id) -> set[str]:
@@ -1112,13 +1060,8 @@ class MarketDataStreamManager:
             )
             if str(item.get("symbol") or "").strip()
         }
-        trap_symbols = trap_reversal_manager.active_symbols(str(user_oid), account_db_id)
-        master_break_symbols = master_break_manager.active_symbols(str(user_oid), account_db_id)
-        scheduled_trade_symbols = set(scheduled_trade_manager.active_symbols(str(user_oid), account_db_id) or set())
-        scheduled_trade_symbols |= set(scheduled_trade_manager.active_symbols_from_db(db, user_oid, account_db_id) or set())
-        # Execution streams are for orders/reconcile only; strategy feed comes from primary.
         manual_order_symbols = manual_order_runtime_manager.active_symbols(db, user_oid, account_db_id)
-        return planner_symbols | active_trade_symbols | trap_symbols | master_break_symbols | scheduled_trade_symbols | manual_order_symbols
+        return planner_symbols | active_trade_symbols | manual_order_symbols
 
     def _execution_session_key(self, user_id: str, account_db_id) -> str:
         return f"{user_id}:{str(account_db_id)}"

@@ -1,5 +1,7 @@
 # Trap Reversal
 
+**Removed.** Do not restore this runtime. See `docs/skills/automation.md`.
+
 ## Purpose
 
 Document the Double Trap Reversal strategy runtime for international MT5 accounts.

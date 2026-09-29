@@ -209,7 +209,7 @@ enum class AppPage(val label: String) {
     }
 }
 
-enum class StrategySection { TrapReversal, TrendPilot, Planner }
+enum class StrategySection { Planner }
 
 enum class AppAppearance(val rawValue: String) {
     System("system"),
@@ -870,116 +870,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun refreshContinuationFailure() {
         val payload = request("/continuation-failure", "GET")
         _state.update { it.copy(continuationFailure = parseContinuationFailure(payload)) }
-    }
-
-    suspend fun fetchTrapReversalActive(): List<TrapReversalRunRow> {
-        val payload = request("/trap-reversal/active", "GET")
-        return parseTrapReversalRuns(payload.optJSONArray("runs") ?: JSONArray())
-    }
-
-    suspend fun fetchTrapReversalLevels(symbol: String): TrapReversalLevels {
-        val payload = request("/trap-reversal/levels/${java.net.URLEncoder.encode(symbol.uppercase(), "UTF-8")}", "GET")
-        return parseTrapReversalLevels(payload)
-    }
-
-    suspend fun startTrapReversal(symbol: String, riskAmount: Double) {
-        request("/trap-reversal/start", "POST", JSONObject().put("symbol", symbol.uppercase()).put("risk_amount", riskAmount))
-    }
-
-    suspend fun stopTrapReversal(symbol: String) {
-        request("/trap-reversal/stop", "POST", JSONObject().put("symbol", symbol.uppercase()))
-    }
-
-    suspend fun fetchTrendPilotActive(): List<TrendPilotRunRow> {
-        val payload = request("/trend-pilot/active", "GET")
-        return parseTrendPilotRuns(payload.optJSONArray("runs") ?: JSONArray())
-    }
-
-    suspend fun fetchTrendPilotHistoryList(): List<TrendPilotHistoryRow> {
-        val payload = request("/trend-pilot/runs?limit=20", "GET")
-        return parseTrendPilotHistoryRows(payload.optJSONArray("runs") ?: JSONArray())
-    }
-
-    suspend fun fetchTrendPilotHistoryDetail(runId: String): JSONObject =
-        request("/trend-pilot/history/${java.net.URLEncoder.encode(runId, "UTF-8")}", "GET")
-
-    suspend fun startTrendPilot(symbol: String, quantity: Double, accountIds: List<String>) {
-        val body = JSONObject()
-            .put("symbol", symbol.uppercase())
-            .put("quantity", quantity)
-            .put("account_ids", JSONArray(accountIds))
-        val payload = request("/trend-pilot/start", "POST", body)
-        val started = payload.optInt("started_count", payload.optJSONArray("runs")?.length() ?: 0)
-        if (started <= 0) {
-            val errors = payload.optJSONArray("errors")
-            val message = errors?.optJSONObject(0)?.optString("error").orEmpty().ifBlank { "Trend Pilot could not be started." }
-            throw IllegalStateException(message)
-        }
-    }
-
-    suspend fun stopTrendPilot(symbol: String, accountIds: List<String>) {
-        request(
-            "/trend-pilot/stop",
-            "POST",
-            JSONObject()
-                .put("symbol", symbol.uppercase())
-                .put("close_position", true)
-                .put("account_ids", JSONArray(accountIds)),
-        )
-    }
-
-    suspend fun fetchTrendPilotBacktests(cursor: String? = null): TrendPilotBacktestPage {
-        val path = buildString {
-            append("/trend-pilot/backtests?limit=20")
-            if (!cursor.isNullOrBlank()) {
-                append("&cursor=")
-                append(java.net.URLEncoder.encode(cursor, "UTF-8"))
-            }
-        }
-        val payload = request(path, "GET")
-        val pageInfo = payload.optJSONObject("page_info")
-        return TrendPilotBacktestPage(
-            results = parseTrendPilotBacktests(payload.optJSONArray("results") ?: JSONArray()),
-            hasNextPage = pageInfo?.optBoolean("has_next_page") == true,
-            endCursor = pageInfo?.optString("end_cursor")?.takeIf { it.isNotBlank() },
-        )
-    }
-
-    suspend fun fetchTrendPilotBacktestDetail(resultId: String): JSONObject =
-        request("/trend-pilot/backtest/${java.net.URLEncoder.encode(resultId, "UTF-8")}", "GET")
-
-    suspend fun runTrendPilotBacktest(symbol: String, quantity: Double, fromDate: String, toDate: String) {
-        request(
-            "/trend-pilot/backtest",
-            "POST",
-            JSONObject()
-                .put("symbol", symbol.uppercase())
-                .put("quantity", quantity)
-                .put("from_date", fromDate)
-                .put("to_date", toDate),
-        )
-    }
-
-    suspend fun deleteTrendPilotBacktest(resultId: String) {
-        request("/trend-pilot/backtest/${java.net.URLEncoder.encode(resultId, "UTF-8")}", "DELETE")
-    }
-
-    suspend fun fetchTrendPilotBacktestSettings(): JSONObject =
-        request("/trend-pilot/backtest/settings", "GET")
-
-    suspend fun saveTrendPilotBacktestSettings(
-        partialAtPct: Double,
-        partialQtyPct: Double,
-        moveSlToBreakeven: Boolean,
-    ) {
-        request(
-            "/trend-pilot/backtest/settings",
-            "PUT",
-            JSONObject()
-                .put("partial_at_pct", partialAtPct)
-                .put("partial_qty_pct", partialQtyPct)
-                .put("move_sl_to_breakeven", moveSlToBreakeven),
-        )
     }
 
     private suspend fun bootstrap() {
@@ -2398,28 +2288,18 @@ private fun CompactInlineForm(label: String, placeholder: String, onSubmit: (Str
 private fun StrategiesScreen(state: AppState, vm: MainViewModel) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (state.strategySection == null) {
-            ScreenHeader("Strategies", "FSM engines, Trend Pilot, and trade planner")
-            StrategyTile("FSM Engines", "Trap reversal automation", false) { vm.openStrategy(StrategySection.TrapReversal) }
-            StrategyTile("Trend Pilot", "H4 breakout engine", false) { vm.openStrategy(StrategySection.TrendPilot) }
+            ScreenHeader("Trade Planner", "Saved plans and order automation")
             StrategyTile("Trade Planner", "${state.plans.count { it.status == "RUNNING" }} running plans", false) { vm.openStrategy(StrategySection.Planner) }
         } else {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = vm::closeStrategy) { Text("← Back", color = AppColors.accent) }
                 Text(
-                    when (state.strategySection) {
-                        StrategySection.TrapReversal -> "FSM Engines"
-                        StrategySection.TrendPilot -> "Trend Pilot"
-                        StrategySection.Planner -> "Trade Planner"
-                    },
+                    "Trade Planner",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
             }
-            when (state.strategySection) {
-                StrategySection.TrapReversal -> TrapReversalScreen(state, vm)
-                StrategySection.TrendPilot -> TrendPilotScreen(state, vm)
-                StrategySection.Planner -> PlannerScreen(state, vm)
-            }
+            PlannerScreen(state, vm)
         }
     }
 }

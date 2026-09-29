@@ -96,7 +96,7 @@ class FeedBrokerConsentGateTests(unittest.TestCase):
 
 
 class MarketDataStreamFeedRoutingTests(unittest.IsolatedAsyncioTestCase):
-    async def test_primary_tick_dispatches_trap_reversal(self):
+    async def test_primary_tick_keeps_order_runtime(self):
         from app.services.market_data_stream import MarketDataStreamManager
 
         manager = MarketDataStreamManager.__new__(MarketDataStreamManager)
@@ -114,21 +114,14 @@ class MarketDataStreamFeedRoutingTests(unittest.IsolatedAsyncioTestCase):
         price = {"symbol": "XAUUSD", "bid": 1.0, "ask": 1.1}
 
         with patch("app.services.market_data_stream.run_sync", new_callable=AsyncMock):
-            with patch("app.services.market_data_stream.trap_reversal_manager") as trap_rev:
-                trap_rev.handle_price = AsyncMock()
-                with patch("app.services.market_data_stream.master_break_manager") as master_break:
-                    master_break.handle_price = AsyncMock()
-                    with patch("app.services.market_data_stream.run_coro_in_thread", new_callable=AsyncMock):
-                        with patch("app.services.market_data_stream.manual_order_runtime_manager"):
-                            with patch("app.services.market_data_stream.m1_candle_builder"):
-                                with patch("app.services.market_data_stream.trade_planner_runtime_manager"):
-                                    await manager._process_tick_work_locked("user-1", session, price)
-
-                trap_rev.handle_price.assert_awaited()
-                args = trap_rev.handle_price.await_args.args
-                self.assertEqual(args[0], "XAUUSD")
-                self.assertEqual(args[1], price)
-                master_break.handle_price.assert_awaited()
+            with patch("app.services.market_data_stream.run_coro_in_thread", new_callable=AsyncMock) as run_coro:
+                with patch("app.services.market_data_stream.manual_order_runtime_manager"):
+                    with patch("app.services.market_data_stream.m1_candle_builder"):
+                        with patch("app.services.market_data_stream.trade_planner_runtime_manager"):
+                            with patch("app.services.market_data_stream.process_due_deferred_orders", new_callable=AsyncMock) as deferred:
+                                await manager._process_tick_work_locked("user-1", session, price)
+                                deferred.assert_awaited()
+                self.assertTrue(run_coro.await_count >= 1)
 
 
 if __name__ == "__main__":

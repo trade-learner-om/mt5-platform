@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { Activity, AlarmClock, Bell, Crosshair, Layers, List, Menu, Moon, Settings, Sun, Workflow } from "lucide-react";
+import { Activity, Bell, List, Menu, Moon, Settings, Sun } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { cn } from "../../lib/cn";
@@ -20,10 +20,6 @@ function formatUsd(value) {
 
 const DEFAULT_NAV = [
   { id: "trading", label: "Watchlist", shortLabel: "Watch", icon: List },
-  { id: "trap-reversal", label: "FSM Engines", shortLabel: "FSM", icon: Workflow },
-  { id: "master-break", label: "Master Break", shortLabel: "MB", icon: Crosshair },
-  { id: "scheduled-trade", label: "Scheduled Trade", shortLabel: "Sched", icon: AlarmClock },
-  { id: "unmitigated-swings", label: "Unmitigated Swings", shortLabel: "Swings", icon: Layers },
   { id: "positions", label: "Positions", shortLabel: "Pos", icon: Activity },
   { id: "settings", label: "Settings", shortLabel: "Set", icon: Settings },
 ];

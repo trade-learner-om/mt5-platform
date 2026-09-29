@@ -35,10 +35,7 @@ This folder is the AI-readable knowledge base for the MT5 platform. Agents must 
 | [trading-order-lifecycle](skills/trading-order-lifecycle.md) | Manual orders, conditional SL, retry/ATM, events |
 | [candle-detector](skills/candle-detector.md) | Hammer / Shooting Star order helper |
 | [trade-planner](skills/trade-planner.md) | Planner plans and pending-order cancellation |
-| [scheduled-break-trade](skills/scheduled-break-trade.md) | User scheduled break tool |
-| [automation](skills/automation.md) | Index of active strategy runtimes |
-| [trap-reversal](skills/trap-reversal.md) | Double Trap Reversal FSM |
-| [master-break](skills/master-break.md) | Master Break live + backtest |
+| [automation](skills/automation.md) | Removed strategy/FSM index — do not revive |
 | [websocket-live-state](skills/websocket-live-state.md) | `/ws/live` snapshots |
 | [chart-datafeed](skills/chart-datafeed.md) | Backend candle caches (chartless UI) |
 | [mongodb](skills/mongodb.md) | Motor DB layer and collections |

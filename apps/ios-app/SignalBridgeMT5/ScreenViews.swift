@@ -895,36 +895,17 @@ struct StrategiesScreen: View {
     var body: some View {
         VStack(spacing: 12) {
             if vm.state.strategySection == nil {
-                ScreenHeader(title: "Strategies", subtitle: "FSM engines, Trend Pilot, and trade planner")
-                StrategyTile(title: "FSM Engines", subtitle: "Trap reversal automation", active: false) {
-                    vm.openStrategy(.trapReversal)
-                }
-                StrategyTile(title: "Trend Pilot", subtitle: "H4 breakout engine", active: false) {
-                    vm.openStrategy(.trendPilot)
-                }
+                ScreenHeader(title: "Trade Planner", subtitle: "Saved plans and order automation")
                 StrategyTile(title: "Trade Planner", subtitle: "\(vm.state.plans.filter { $0.status == "RUNNING" }.count) running plans", active: false) {
                     vm.openStrategy(.planner)
                 }
             } else {
                 HStack {
                     Button("← Back") { vm.closeStrategy() }.foregroundStyle(AppColors.accent)
-                    Text(strategyTitle).appHeadline()
+                    Text("Trade Planner").appHeadline()
                 }
-                switch vm.state.strategySection! {
-                case .trapReversal: TrapReversalScreen()
-                case .trendPilot: TrendPilotScreen()
-                case .planner: PlannerScreen()
-                }
+                PlannerScreen()
             }
-        }
-    }
-
-    private var strategyTitle: String {
-        switch vm.state.strategySection {
-        case .trapReversal: return "FSM Engines"
-        case .trendPilot: return "Trend Pilot"
-        case .planner: return "Trade Planner"
-        case .none: return ""
         }
     }
 }

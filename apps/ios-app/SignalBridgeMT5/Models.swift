@@ -23,7 +23,7 @@ enum AppPage: String, CaseIterable, Identifiable {
 }
 
 enum StrategySection {
-    case trapReversal, trendPilot, planner
+    case planner
 }
 
 enum AppAppearance: String {

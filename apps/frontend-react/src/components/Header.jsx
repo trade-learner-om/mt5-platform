@@ -68,7 +68,6 @@ export default function Header({
     { id: "trading", label: "Trading" },
     { id: "positions", label: "Positions" },
     { id: "trade-planner", label: "Trade Planner" },
-    { id: "trap-reversal", label: "Trap Reversal" },
     ...(me?.is_admin ? [{ id: "admin", label: "Admin" }] : []),
   ];
   const primaryNavItems = useMemo(() => {

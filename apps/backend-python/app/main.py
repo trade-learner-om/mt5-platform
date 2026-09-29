@@ -17,7 +17,6 @@ from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from jose import JWTError, jwt
-import pandas as pd
 from pymongo import UpdateOne
 from starlette.websockets import WebSocketState
 
@@ -42,9 +41,6 @@ from .schemas import (
     MarketSelectIn,
     MultiRiskPreviewOut,
     IndianOtpVerifyIn,
-    IndianPeCycleBacktestIn,
-    IndianPeCycleBacktestListOut,
-    IndianStrategyPreviewIn,
     NotificationOut,
     OrderCreateIn,
     OrderEventOut,
@@ -69,18 +65,6 @@ from .schemas import (
     TradePlannerPlanUpdateIn,
     TradePlannerTargetOut,
     TokenOut,
-    TrapReversalStartIn,
-    TrapReversalStopIn,
-    MasterBreakBacktestIn,
-    MasterBreakSettingsIn,
-    MasterBreakSettingsOut,
-    MasterBreakStartIn,
-    MasterBreakStopIn,
-    ScheduledTradeCreateIn,
-    ScheduledTradeEventOut,
-    ScheduledTradeOut,
-    UnmitigatedSwingsExecuteIn,
-    UnmitigatedSwingsQueryIn,
     UserUiSettingsUpdateIn,
     UserSnapshotOut,
     WatchlistItemOut,
@@ -90,14 +74,7 @@ from .services.metaapi_client import LocalMT5Error, is_missing_broker_order_erro
 from .services.manual_order_runtime import RETRYABLE_ORDER_TYPES, manual_order_runtime_manager
 from .services.market_data_stream import market_data_stream
 from .services.indian_market_stream import indian_market_stream_manager, INDIAN_WATCHLIST_COLLECTION
-from .services.indian_fno_contracts import fno_equity_underlyings, pick_equity
-from .services.indian_pe_cycle_persistence import (
-    delete_pe_cycle_backtest,
-    get_pe_cycle_backtest,
-    list_pe_cycle_backtests,
-    save_pe_cycle_backtest,
-)
-from .services.indian_pe_stock_ce_backtest import simulate_pe_stock_ce_backtest
+from .services.indian_fno_contracts import fno_equity_underlyings
 from .services.mstock_client import mstock_client
 from .services.secret_store import decrypt_secret, encrypt_secret
 from .services.async_runtime import run_coro_in_thread, run_sync
@@ -133,37 +110,13 @@ from .services.symbol_resolver import (
     suggest_symbols,
 )
 from .services.candle_history import (
-    get_backtest_candles,
     get_chart_candles,
-    get_fresh_candles,
-    get_recent_chart_candles,
     parse_chart_datetime,
     timeframe_seconds,
 )
 from .services.candle_patterns import _has_min_candle_range, _is_hammer, _is_shooting_star
 from .services.quick_order import build_quick_order_quote
 from .services.state_manager import live_state_hub
-from .services.trap_reversal_automation import index_h1_levels, trap_reversal_manager
-from .services.master_break_settings import SETTINGS_KEY as MASTER_BREAK_SETTINGS_KEY
-from .services.master_break_settings import STRATEGY_TYPE as MASTER_BREAK_STRATEGY_TYPE
-from .services.master_break_settings import MasterBreakSettings
-from .services.master_break_runtime import master_break_manager
-from .services.scheduled_trade_runtime import scheduled_trade_manager, seed_recent_candles
-from .services.structure_swings import (
-    analyze_unmitigated_swings,
-    execute_unmitigated_swings,
-    get_active_structure_session,
-    get_structure_session,
-    list_structure_sessions,
-)
-from .services.master_break_backtest import simulate_master_break_backtest
-from .services.master_break_backtest_persistence import (
-    delete_backtest as delete_master_break_backtest,
-    get_backtest as get_master_break_backtest,
-    list_page as list_master_break_backtests_page,
-    list_trades_page as list_master_break_trades_page,
-    save_backtest_result as save_master_break_backtest_result,
-)
 from .services.feed_broker_consent import (
     build_consent_record,
     build_mismatch_warning,
@@ -189,8 +142,6 @@ HEADER_NAV_PAGE_ORDER = (
     "trading",
     "positions",
     "trade-planner",
-    "trap-reversal",
-    "master-break",
     "admin",
 )
 DEFAULT_HEADER_PRIMARY_TABS = ("trading", "positions")
@@ -351,32 +302,6 @@ def _seed_default_admin_user(db):
 
 
 async def _restore_market_data_runtime(db):
-    def _restore_master_break_runs():
-        def load_account(user_id, account_id):
-            query: Dict[str, object] = {}
-            if account_id is not None:
-                try:
-                    query["_id"] = account_id if isinstance(account_id, ObjectId) else ObjectId(str(account_id))
-                except Exception:
-                    query["_id"] = account_id
-            if user_id is not None:
-                try:
-                    query["user_id"] = user_id if isinstance(user_id, ObjectId) else ObjectId(str(user_id))
-                except Exception:
-                    query["user_id"] = user_id
-            if not query:
-                return None
-            return db.meta_accounts.find_one(query)
-
-        return master_break_manager.restore(db, load_account=load_account)
-
-    try:
-        restored = await run_sync(_restore_master_break_runs)
-        if restored:
-            logger.info("Restored %s master_break runs", restored)
-    except Exception:
-        logger.exception("Master Break runtime restore failed")
-
     loop = asyncio.get_running_loop()
     await market_data_stream._run_on_tick_loop(
         market_data_stream.restore_running_streams,
@@ -612,13 +537,6 @@ def _serialize_user_ui_settings(user: Optional[dict]) -> Dict[str, object]:
     usage = _normalize_nav_usage_map(((user or {}).get("ui_settings") or {}).get("page_usage"), user)
     raw_order_defaults = ((user or {}).get("ui_settings") or {}).get("order_defaults")
     order_defaults = raw_order_defaults if isinstance(raw_order_defaults, dict) else {}
-    raw_master_break = ((user or {}).get("ui_settings") or {}).get(MASTER_BREAK_SETTINGS_KEY)
-    master_break = None
-    if isinstance(raw_master_break, dict):
-        try:
-            master_break = MasterBreakSettings.from_mapping(raw_master_break).to_dict()
-        except ValueError:
-            master_break = None
     return {
         "page_usage": usage,
         "header_primary_tabs": _resolve_header_primary_tabs(user),
@@ -632,7 +550,6 @@ def _serialize_user_ui_settings(user: Optional[dict]) -> Dict[str, object]:
                 order_defaults.get("retryable_order") if order_defaults.get("retryable_order") is not None else True
             ),
         },
-        "master_break": master_break,
     }
 
 
@@ -871,31 +788,6 @@ async def _lookup_international_account_async(user_id: ObjectId, account_oid: Ob
     return account
 
 
-async def _resolve_strategy_accounts(user: dict, db, account_ids: list[str]) -> list[dict]:
-    """Resolve a list of international account IDs for any strategy start/stop call."""
-    user_id = user["_id"]
-    if not account_ids:
-        return [await _assert_account_async(user, db)]
-    accounts = []
-    seen = set()
-    for raw_id in account_ids:
-        account_key = str(raw_id or "").strip()
-        if not account_key or account_key in seen:
-            continue
-        seen.add(account_key)
-        try:
-            account_oid = parse_object_id(account_key)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid account id: {account_key}") from exc
-        account = await _lookup_international_account_async(user_id, account_oid, db)
-        if not account:
-            raise HTTPException(status_code=404, detail=f"International account not found: {account_key}")
-        accounts.append(account)
-    if not accounts:
-        raise HTTPException(status_code=400, detail="Select at least one international account.")
-    return accounts
-
-
 def _assert_account(user: dict, db):
     user_id = user["_id"]
     candidates = _selected_account_candidate_ids(user)
@@ -1098,35 +990,6 @@ def _normalize_historical_candle(candle: dict) -> dict:
     }
 
 
-async def _load_historical_candles_since(account: dict, symbol: str, timeframe: str, cutoff: datetime) -> list[dict]:
-    all_candles = []
-    cursor = datetime.now(timezone.utc)
-
-    while True:
-        chunk = await metaapi_service.get_historical_candles(
-            account["api_token"],
-            account["account_id"],
-            symbol,
-            timeframe,
-            start_time=cursor,
-            limit=1000,
-        )
-        if not chunk:
-            break
-        normalized = [_normalize_historical_candle(candle) for candle in chunk]
-        all_candles.extend(normalized)
-        oldest = min(normalized, key=lambda candle: candle["time"])
-        oldest_time = oldest["time"]
-        if oldest_time <= cutoff or len(normalized) < 1000:
-            break
-        cursor = oldest_time - timedelta(hours=1)
-
-    completed_cutoff = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-    filtered = [candle for candle in all_candles if cutoff <= candle["time"] < completed_cutoff]
-    filtered.sort(key=lambda candle: candle["time"])
-    return filtered
-
-
 def _utc_naive(value: datetime) -> datetime:
     if value.tzinfo:
         return value.astimezone(timezone.utc).replace(tzinfo=None)
@@ -1141,157 +1004,6 @@ def _broker_cache_key(account: dict) -> str:
     if server:
         return "|".join(part for part in [server, broker_type, account_currency] if part)
     return f"METAACCOUNT|{str(account.get('account_id') or '').upper()}"
-
-
-TRAP_REVERSAL_H1_LIMIT = 1500
-TRAP_REVERSAL_M1_SEED_LIMIT = 240
-
-
-def _chart_candles_to_dataframe(candles: list[dict]) -> pd.DataFrame:
-    rows = []
-    for candle in candles:
-        ts = candle.get("time")
-        if isinstance(ts, (int, float)):
-            dt = datetime.fromtimestamp(int(ts), tz=timezone.utc)
-        else:
-            dt = parse_chart_datetime(ts)
-        rows.append(
-            {
-                "time": dt,
-                "open": float(candle.get("open") or 0),
-                "high": float(candle.get("high") or 0),
-                "low": float(candle.get("low") or 0),
-                "close": float(candle.get("close") or 0),
-                "volume": float(candle.get("volume") or candle.get("tickVolume") or 0),
-            }
-        )
-    return pd.DataFrame(rows)
-
-
-async def _load_trap_reversal_level_context(db, account: dict, symbol: str) -> tuple[str, dict, list[float], list[float]]:
-    broker_symbol = await _resolve_symbol_for_account(account, symbol)
-    symbol_spec = await _symbol_spec_for_account(account, broker_symbol)
-    to_time = datetime.now(timezone.utc)
-    from_time = to_time - timedelta(hours=TRAP_REVERSAL_H1_LIMIT)
-    candles = await get_chart_candles(db, account, broker_symbol, "1h", from_time, to_time, TRAP_REVERSAL_H1_LIMIT)
-    if len(candles) < 20:
-        raise HTTPException(status_code=400, detail="Not enough H1 candles for trap reversal indexing.")
-    supports, resistances = await asyncio.to_thread(index_h1_levels, _chart_candles_to_dataframe(candles))
-    return broker_symbol, symbol_spec, supports, resistances
-
-
-async def _load_trap_reversal_m1_seed(db, account: dict, broker_symbol: str) -> list[dict]:
-    to_time = datetime.now(timezone.utc)
-    from_time = to_time - timedelta(minutes=TRAP_REVERSAL_M1_SEED_LIMIT)
-    return await get_chart_candles(db, account, broker_symbol, "1m", from_time, to_time, TRAP_REVERSAL_M1_SEED_LIMIT)
-
-
-def _load_master_break_settings(user: Optional[dict]) -> MasterBreakSettings:
-    raw = ((user or {}).get("ui_settings") or {}).get(MASTER_BREAK_SETTINGS_KEY)
-    return MasterBreakSettings.from_mapping(raw if isinstance(raw, dict) else None)
-
-
-async def _persist_master_break_settings(db, user: dict, settings_dict: dict) -> MasterBreakSettings:
-    settings = MasterBreakSettings.from_mapping(settings_dict)
-    payload = settings.to_dict()
-    ui_settings = dict(user.get("ui_settings") or {})
-    ui_settings[MASTER_BREAK_SETTINGS_KEY] = payload
-    user["ui_settings"] = ui_settings
-    await persist_user_document_async(db, user["_id"], {"ui_settings": ui_settings})
-    return settings
-
-
-def _resolve_master_break_settings(
-    user: Optional[dict],
-    *,
-    risk_amount: Optional[float] = None,
-    master_timeframe: Optional[str] = None,
-    exec_timeframe: Optional[str] = None,
-    breakeven_r: Optional[float] = None,
-    targets: Optional[list] = None,
-    nested: Optional[dict] = None,
-) -> MasterBreakSettings:
-    base = _load_master_break_settings(user).to_dict()
-    if nested:
-        base.update({key: value for key, value in nested.items() if value is not None})
-    if risk_amount is not None:
-        base["risk_amount"] = risk_amount
-    if master_timeframe is not None:
-        base["master_timeframe"] = master_timeframe
-    if exec_timeframe is not None:
-        base["exec_timeframe"] = exec_timeframe
-    if breakeven_r is not None:
-        base["breakeven_r"] = breakeven_r
-    if targets is not None:
-        base["targets"] = targets
-    return MasterBreakSettings.from_mapping(base)
-
-
-async def _load_master_break_seed_candles(db, account: dict, broker_symbol: str, settings: MasterBreakSettings) -> tuple[list[dict], list[dict]]:
-    master_tf = settings.master_timeframe
-    exec_tf = settings.exec_timeframe
-    try:
-        master_candles = await get_fresh_candles(db, account, broker_symbol, timeframe=master_tf, limit=64)
-    except Exception:
-        master_candles = await get_recent_chart_candles(
-            db,
-            account,
-            broker_symbol,
-            master_tf,
-            limit=64,
-            min_bars=8,
-            force_broker_refresh=True,
-        )
-    try:
-        exec_candles = await get_fresh_candles(db, account, broker_symbol, timeframe=exec_tf, limit=32)
-    except Exception:
-        exec_candles = await get_recent_chart_candles(
-            db,
-            account,
-            broker_symbol,
-            exec_tf,
-            limit=32,
-            min_bars=4,
-            force_broker_refresh=True,
-        )
-    if len(master_candles) < 2:
-        raise HTTPException(status_code=400, detail=f"Not enough {master_tf} candles to seed Master Break.")
-    if len(exec_candles) < 2:
-        raise HTTPException(status_code=400, detail=f"Not enough {exec_tf} candles to seed Master Break.")
-    return master_candles, exec_candles
-
-
-def _parse_backtest_day(value: str) -> datetime:
-    text = str(value or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="Backtest date is required.")
-    try:
-        if len(text) <= 10:
-            parsed = datetime.fromisoformat(text)
-            return parsed.replace(tzinfo=timezone.utc)
-        return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(timezone.utc)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid backtest date.") from exc
-
-
-def _contract_value_per_point(symbol_spec: Optional[dict]) -> float:
-    spec = symbol_spec or {}
-    tick_value = _safe_float(spec.get("tickValue"), 0.0)
-    contract_size = _safe_float(spec.get("contractSize"), 0.0)
-    if tick_value > 0:
-        return tick_value
-    if contract_size > 0:
-        return contract_size
-    return 1.0
-
-
-def _safe_float(value, default: float = 0.0) -> float:
-    try:
-        if value is None or value == "":
-            return default
-        return float(value)
-    except (TypeError, ValueError):
-        return default
 
 
 def _parse_iso_timestamp(value: Optional[str]) -> Optional[datetime]:
@@ -1368,132 +1080,6 @@ def _account_server_time_fields(payload: dict) -> dict:
     }
 
 
-def _bucket_label_for_entry(dt_value: datetime) -> str:
-    local_dt = dt_value.astimezone(ZoneInfo(settings.timezone))
-    return f"{local_dt:%H}:00-{local_dt:%H}:59"
-
-
-def _weekday_label(dt_value: datetime) -> str:
-    return dt_value.astimezone(ZoneInfo(settings.timezone)).strftime("%a")
-
-
-def _top_group(groups: dict, reverse: bool = True):
-    if not groups:
-        return None
-    ordered = sorted(groups.items(), key=lambda item: (item[1]["netPnl"], item[1]["count"]), reverse=reverse)
-    return ordered[0]
-
-
-def _analyze_backtest_rows(symbol: str, rows: list[dict]) -> dict:
-    instrument_rows = [row for row in rows if str(row.get("symbol") or "").upper() == symbol.upper()]
-    if not instrument_rows:
-        raise HTTPException(status_code=404, detail=f"No backtest rows found for {symbol}")
-
-    frame = pd.DataFrame(instrument_rows).copy()
-    frame["entry_dt"] = frame.apply(
-        lambda row: _parse_iso_timestamp(row.get("entryTime")) or _parse_iso_timestamp(row.get("detectedAt")),
-        axis=1,
-    )
-    frame["pnl"] = pd.to_numeric(frame.get("pnl"), errors="coerce").fillna(0.0)
-    frame["highestRR"] = pd.to_numeric(frame.get("highestRR"), errors="coerce").fillna(0.0)
-    frame["realizedR"] = pd.to_numeric(frame.get("realizedR"), errors="coerce").fillna(0.0)
-    frame["missedRR"] = (frame["highestRR"] - frame["realizedR"]).clip(lower=0.0)
-    frame["entryHourBucket"] = frame["entry_dt"].apply(lambda value: _bucket_label_for_entry(value) if value else "Unknown")
-    frame["weekday"] = frame["entry_dt"].apply(lambda value: _weekday_label(value) if value else "Unknown")
-    frame["candleType"] = frame["candleType"].fillna("Unknown")
-    frame["attempt"] = frame["attempt"].fillna("INITIAL")
-    frame["exitType"] = frame["exitType"].fillna("UNKNOWN")
-
-    def summarize_group(column: str, ascending: bool = False):
-        grouped = (
-            frame.groupby(column, dropna=False)
-            .agg(
-                netPnl=("pnl", "sum"),
-                count=("pnl", "size"),
-                wins=("pnl", lambda values: int((values > 0).sum())),
-                losses=("pnl", lambda values: int((values < 0).sum())),
-            )
-            .reset_index()
-            .sort_values(["netPnl", "count"], ascending=[ascending, ascending])
-        )
-        if grouped.empty:
-            return None
-        top = grouped.iloc[0]
-        return (
-            str(top[column]),
-            {
-                "netPnl": round(float(top["netPnl"]), 2),
-                "count": int(top["count"]),
-                "wins": int(top["wins"]),
-                "losses": int(top["losses"]),
-            },
-        )
-
-    best_hour = summarize_group("entryHourBucket", ascending=False)
-    worst_hour = summarize_group("entryHourBucket", ascending=True)
-    best_day = summarize_group("weekday", ascending=False)
-    worst_day = summarize_group("weekday", ascending=True)
-    best_pattern = summarize_group("candleType", ascending=False)
-    worst_pattern = summarize_group("candleType", ascending=True)
-    best_attempt = summarize_group("attempt", ascending=False)
-    worst_attempt = summarize_group("attempt", ascending=True)
-    best_exit = summarize_group("exitType", ascending=False)
-    avg_missed_rr = round(float(frame["missedRR"].mean()), 2) if not frame.empty else 0.0
-
-    insights = []
-    if worst_hour:
-        insights.append(
-            f"Most losses came from the {worst_hour[0]} IST entry window, with net PnL {worst_hour[1]['netPnl']} across {worst_hour[1]['count']} trade(s)."
-        )
-    if best_hour:
-        insights.append(
-            f"Most profits came from the {best_hour[0]} IST entry window, with net PnL {best_hour[1]['netPnl']} across {best_hour[1]['count']} trade(s)."
-        )
-    if best_day and worst_day:
-        insights.append(
-            f"Best weekday was {best_day[0]} ({best_day[1]['netPnl']}), while {worst_day[0]} was the weakest ({worst_day[1]['netPnl']})."
-        )
-    if best_pattern and worst_pattern:
-        insights.append(
-            f"Pattern performance shows {best_pattern[0]} strongest at {best_pattern[1]['netPnl']} net PnL, while {worst_pattern[0]} lagged at {worst_pattern[1]['netPnl']}."
-        )
-    if best_attempt and worst_attempt:
-        insights.append(
-            f"Attempt analysis shows {best_attempt[0]} performed best at {best_attempt[1]['netPnl']}, whereas {worst_attempt[0]} contributed {worst_attempt[1]['netPnl']}."
-        )
-    if best_exit:
-        insights.append(
-            f"The most effective exit style was {best_exit[0]}, producing {best_exit[1]['netPnl']} net PnL."
-        )
-    insights.append(
-        f"Average missed upside was {avg_missed_rr}R per trade, comparing highest RR achieved versus realized R."
-    )
-
-    recommendations = []
-    if worst_hour and best_hour and worst_hour[0] != best_hour[0]:
-        recommendations.append(f"Reduce exposure during {worst_hour[0]} IST and prioritize setups around {best_hour[0]} IST.")
-    if worst_pattern and best_pattern and worst_pattern[0] != best_pattern[0]:
-        recommendations.append(f"Review the validation quality of {worst_pattern[0]} setups and benchmark them against {best_pattern[0]}.")
-    if worst_attempt and best_attempt and worst_attempt[0] != best_attempt[0]:
-        recommendations.append("Compare whether re-entry logic is improving expectancy or simply extending drawdown relative to initial entries.")
-    recommendations.append("Inspect trades with high achieved RR but weak realized PnL to refine trailing, partial-exit, or reversal handling.")
-
-    return {
-        "symbol": symbol.upper(),
-        "trade_count": len(instrument_rows),
-        "source": "pandas",
-        "model": "pandas",
-        "highlights": {
-            "best_profit_timespan": best_hour[0] if best_hour else None,
-            "best_profit_timespan_pnl": best_hour[1]["netPnl"] if best_hour else None,
-            "worst_loss_timespan": worst_hour[0] if worst_hour else None,
-            "worst_loss_timespan_pnl": worst_hour[1]["netPnl"] if worst_hour else None,
-        },
-        "insights": insights,
-        "recommendations": recommendations,
-    }
-
-
 def _broker_info_from_account(account: Optional[dict]) -> dict:
     if not account:
         return {}
@@ -1540,18 +1126,6 @@ def _build_manual_context(
         context["trigger_price"] = float(data.trigger_price) if data.trigger_price is not None else None
         context["conditional_triggered"] = False
     return context
-
-
-def _is_strategy_owned_order(order: dict) -> bool:
-    if order.get("trap_reversal_run_id"):
-        return True
-    if order.get("planner_context"):
-        return True
-    if order.get("scheduled_trade_id"):
-        return True
-    if order.get("dry_run"):
-        return True
-    return False
 
 
 def _pick_active_account_id(accounts: List[dict], selected_account_id) -> Optional[ObjectId]:
@@ -1616,24 +1190,6 @@ def _to_notification_out(doc: dict) -> NotificationOut:
         placement_fallback_reason=doc.get("placement_fallback_reason"),
         timestamp=_as_utc_datetime(doc["created_at"]),
         broker_info=doc.get("broker_info"),
-    )
-
-
-def _notify_strategy_action(db, user_id, category: str, symbol: str, status: str, activity: str, event_type: str, payload: Optional[dict] = None):
-    db.notifications.insert_one(
-        {
-            "user_id": user_id,
-            "order_id": None,
-            "symbol": str(symbol or "").upper(),
-            "category": category,
-            "event_type": event_type,
-            "status": status,
-            "activity": activity,
-            "failure_reason": None,
-            "payload": payload or {},
-            "created_at": datetime.utcnow(),
-            "broker_info": None,
-        }
     )
 
 
@@ -3721,199 +3277,6 @@ async def _require_indian_session(user: dict, db) -> tuple[dict, str, str]:
     return account, api_key, access_token
 
 
-@app.post("/indian/pe-cycle/backtest")
-async def run_indian_pe_cycle_backtest(
-    data: IndianPeCycleBacktestIn,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    account, api_key, access_token = await _require_indian_session(user, db)
-    underlying = str(data.underlying or "").strip().upper()
-    if not underlying:
-        raise HTTPException(status_code=400, detail="Underlying stock is required.")
-    catalog = await mstock_client.get_instrument_catalog(api_key, access_token)
-    equity = pick_equity(catalog, underlying)
-    if not equity:
-        raise HTTPException(status_code=400, detail=f"Equity instrument not found for {underlying}.")
-
-    # Validate that from_date is within the window of currently-available option data.
-    # The live catalog is a snapshot — expired contracts are not listed, so candles for
-    # them cannot be fetched. Reject requests that would silently produce empty results.
-    from datetime import date as _date, timedelta as _timedelta
-    from .services.indian_fno_contracts import monthly_expiries_on_or_after as _monthly_expiries
-    _today = _date.today()
-    _available_expiries = _monthly_expiries(catalog, underlying, _today)
-    if _available_expiries:
-        _earliest_expiry = min(_available_expiries)
-        # Contracts are listed roughly 3 months before expiry; use start of that month.
-        _min_from = (_earliest_expiry.replace(day=1) - _timedelta(days=90)).replace(day=1)
-        _requested_from = _date.fromisoformat(str(data.from_date)[:10])
-        if _requested_from < _min_from:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"from_date {_requested_from.isoformat()} is too far in the past for {underlying}. "
-                    f"The earliest available option contract expires {_earliest_expiry.isoformat()}; "
-                    f"set from_date to {_min_from.isoformat()} or later."
-                ),
-            )
-
-    def sync_load_candles(instrument: dict, from_date: str, to_date: str) -> list[dict]:
-        segment = mstock_client.segment_for_instrument(instrument)
-        token = instrument.get("instrument_token")
-        # mStock API requires datetime strings with time component (e.g. "2024-08-02 09:15:00")
-        api_from = f"{from_date} 09:15:00" if len(str(from_date)) == 10 else str(from_date)
-        api_to = f"{to_date} 15:30:00" if len(str(to_date)) == 10 else str(to_date)
-        try:
-            client = mstock_client._new_client(api_key=api_key, access_token=access_token)
-            response = client.get_historical_chart(str(segment), str(token), "day", api_from, api_to)
-            try:
-                payload = mstock_client._extract_payload(response) if hasattr(response, "json") else response
-            except Exception:
-                payload = response
-            return mstock_client._normalize_historical_candles(payload)
-        except Exception as exc:
-            logger.warning(
-                "PE cycle historical fetch failed | symbol=%s error=%s",
-                instrument.get("symbol"),
-                exc,
-            )
-            return []
-
-    try:
-        simulation = await run_sync(
-            simulate_pe_stock_ce_backtest,
-            catalog=catalog,
-            underlying=underlying,
-            from_date=data.from_date,
-            to_date=data.to_date,
-            load_candles=sync_load_candles,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.exception("PE cycle backtest failed")
-        raise HTTPException(status_code=400, detail=f"Backtest failed: {exc}") from exc
-
-    backtest_id = save_pe_cycle_backtest(
-        db,
-        user_id=user["_id"],
-        account_id=account["_id"],
-        underlying=underlying,
-        from_date=data.from_date,
-        to_date=data.to_date,
-        simulation=simulation,
-    )
-    detail = get_pe_cycle_backtest(db, user["_id"], backtest_id)
-    return detail
-
-
-@app.get("/indian/pe-cycle/backtests", response_model=IndianPeCycleBacktestListOut)
-async def list_indian_pe_cycle_backtests(
-    limit: int = Query(default=20, ge=1, le=50),
-    user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    results = list_pe_cycle_backtests(db, user["_id"], limit=limit)
-    return IndianPeCycleBacktestListOut(results=results)
-
-
-@app.get("/indian/pe-cycle/backtest/{backtest_id}")
-async def get_indian_pe_cycle_backtest(backtest_id: str, user=Depends(get_current_user), db=Depends(get_db)):
-    try:
-        oid = parse_object_id(backtest_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid backtest id") from exc
-    detail = get_pe_cycle_backtest(db, user["_id"], oid)
-    if not detail:
-        raise HTTPException(status_code=404, detail="Backtest not found")
-    return detail
-
-
-@app.delete("/indian/pe-cycle/backtest/{backtest_id}")
-async def delete_indian_pe_cycle_backtest(backtest_id: str, user=Depends(get_current_user), db=Depends(get_db)):
-    try:
-        oid = parse_object_id(backtest_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid backtest id") from exc
-    deleted = delete_pe_cycle_backtest(db, user["_id"], oid)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Backtest not found")
-    return {"ok": True}
-
-
-@app.post("/indian/strategy/preview")
-async def preview_indian_strategy(data: IndianStrategyPreviewIn, user=Depends(get_current_user), db=Depends(get_db)):
-    account = await db.meta_accounts.find_one_async({"_id": user.get("selected_indian_account_id"), "user_id": user["_id"]}) if user.get("selected_indian_account_id") else None
-    if not account or _normalize_market_type(account.get("market_type")) != "INDIAN":
-        raise HTTPException(status_code=400, detail="Indian strategy preview is available only in Indian Market.")
-    if not data.legs:
-        return {"legs": [], "required_margin": 0}
-    session_doc = await db[INDIAN_SESSION_COLLECTION].find_one_async({"user_id": user["_id"], "account_id": account["_id"]})
-    access_token_encrypted = str((session_doc or {}).get("access_token_encrypted") or "").strip()
-    if not access_token_encrypted:
-        raise HTTPException(status_code=400, detail="Connect the Indian broker session first.")
-    try:
-        access_token = decrypt_secret(access_token_encrypted)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Unable to read the Indian broker session.")
-    api_key = str((account.get("credentials") or {}).get("api_key") or "").strip()
-    if not api_key:
-        raise HTTPException(status_code=400, detail="Indian broker API key is missing.")
-
-    preview_legs = []
-    total_required_margin = 0.0
-    for leg in data.legs:
-        lots = max(int(leg.lots or 1), 1)
-        lot_size = max(int(leg.lot_size or 1), 1)
-        quantity = lots * lot_size
-        product = _indian_margin_product(leg.instrument_type, leg.exchange)
-        preview = {
-            "symbol": leg.symbol,
-            "exchange": leg.exchange,
-            "instrument_type": leg.instrument_type,
-            "option_type": leg.option_type,
-            "strike": leg.strike,
-            "expiry": leg.expiry,
-            "lot_size": lot_size,
-            "action": str(leg.action or "BUY").upper(),
-            "lots": lots,
-            "quantity": quantity,
-            "price": float(leg.price or 0),
-            "product": product,
-            "required_margin": None,
-            "charges": None,
-        }
-        try:
-            margin_payload = await mstock_client.calculate_margin_for_leg(
-                api_key,
-                access_token,
-                exchange=leg.exchange,
-                tradingsymbol=leg.symbol,
-                transaction_type=preview["action"],
-                quantity=quantity,
-                price=float(leg.price or 0),
-                product=product,
-            )
-            margin_value = float(
-                margin_payload.get("total")
-                or margin_payload.get("required_margin")
-                or margin_payload.get("margin")
-                or 0
-            )
-            preview["required_margin"] = margin_value
-            preview["charges"] = margin_payload.get("charges")
-            total_required_margin += margin_value
-        except Exception as exc:
-            preview["margin_error"] = str(exc)
-        preview_legs.append(preview)
-
-    return {
-        "legs": preview_legs,
-        "required_margin": total_required_margin,
-    }
-
-
 @app.post("/indian/watchlist")
 async def add_indian_watchlist(data: WatchlistUpsertIn, user=Depends(get_current_user), db=Depends(get_db)):
     account = await db.meta_accounts.find_one_async({"_id": user.get("selected_indian_account_id"), "user_id": user["_id"]}) if user.get("selected_indian_account_id") else None
@@ -4201,628 +3564,6 @@ async def risk_preview_multi(data: OrderCreateIn, user=Depends(get_current_user)
         price_digits=digits_from_symbol_spec(symbol_spec),
         targets=preview_targets,
     )
-
-
-@app.post("/trap-reversal/start")
-async def start_trap_reversal(data: TrapReversalStartIn, user=Depends(get_current_user), db=Depends(get_db)):
-    if float(data.risk_amount or 0) <= 0:
-        raise HTTPException(status_code=400, detail="risk_amount must be greater than 0")
-
-    account = await _assert_account_async(user, db)
-    if _normalize_market_type(account.get("market_type")) != MARKET_INTERNATIONAL:
-        raise HTTPException(status_code=400, detail="Trap reversal is available for international MT5 accounts only.")
-
-    normalized_symbol = normalize_symbol(data.symbol)
-    broker_symbol, symbol_spec, supports, resistances = await _load_trap_reversal_level_context(db, account, normalized_symbol)
-    m1_candles = await _load_trap_reversal_m1_seed(db, account, broker_symbol)
-    snapshot = trap_reversal_manager.start_run(
-        user_id=str(user["_id"]),
-        account=account,
-        requested_symbol=normalized_symbol,
-        broker_symbol=broker_symbol,
-        display_symbol=display_symbol(normalized_symbol, broker_symbol),
-        risk_amount=float(data.risk_amount),
-        supports=supports,
-        resistances=resistances,
-        m1_candles=m1_candles,
-        price_digits=digits_from_symbol_spec(symbol_spec),
-        point_size=float(symbol_spec.get("point") or symbol_spec.get("tickSize") or 0.0),
-    )
-    await _ensure_market_data_stream(db, str(user["_id"]))
-    await live_state_hub.push_snapshot(db, str(user["_id"]))
-    return {
-        **snapshot,
-        "supports": supports,
-        "resistances": resistances,
-    }
-
-
-@app.post("/trap-reversal/stop")
-async def stop_trap_reversal(data: TrapReversalStopIn, user=Depends(get_current_user), db=Depends(get_db)):
-    account = await _assert_account_async(user, db)
-    broker_symbol = await _resolve_symbol_for_account(account, data.symbol)
-    result = trap_reversal_manager.stop_run(broker_symbol, str(user["_id"]))
-    await _ensure_market_data_stream(db, str(user["_id"]))
-    await live_state_hub.push_snapshot(db, str(user["_id"]))
-    return result
-
-
-@app.get("/trap-reversal/levels/{symbol}")
-async def get_trap_reversal_levels(symbol: str, user=Depends(get_current_user), db=Depends(get_db)):
-    account = await _assert_account_async(user, db)
-    broker_symbol, symbol_spec, supports, resistances = await _load_trap_reversal_level_context(db, account, symbol)
-    return {
-        "requested_symbol": normalize_symbol(symbol),
-        "symbol": broker_symbol,
-        "display_symbol": display_symbol(symbol, broker_symbol),
-        "price_digits": digits_from_symbol_spec(symbol_spec),
-        "point_size": float(symbol_spec.get("point") or symbol_spec.get("tickSize") or 0.0),
-        "active_h1_supports": supports,
-        "active_h1_resistances": resistances,
-    }
-
-
-@app.get("/trap-reversal/active")
-async def get_trap_reversal_active(user=Depends(get_current_user)):
-    return {"runs": trap_reversal_manager.snapshot_for_user(str(user["_id"]))}
-
-
-@app.post("/master-break/start")
-async def start_master_break(data: MasterBreakStartIn, user=Depends(get_current_user), db=Depends(get_db)):
-    account = await _assert_account_async(user, db)
-    if _normalize_market_type(account.get("market_type")) != MARKET_INTERNATIONAL:
-        raise HTTPException(status_code=400, detail="Master Break is available for international MT5 accounts only.")
-
-    nested = data.settings.model_dump() if data.settings is not None else None
-    try:
-        settings = _resolve_master_break_settings(
-            user,
-            risk_amount=data.risk_amount,
-            master_timeframe=data.master_timeframe,
-            exec_timeframe=data.exec_timeframe,
-            breakeven_r=data.breakeven_r,
-            targets=[item.model_dump() for item in data.targets] if data.targets is not None else None,
-            nested=nested,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    normalized_symbol = normalize_symbol(data.symbol or "XAUUSD")
-    if not is_gold_request(normalized_symbol):
-        raise HTTPException(status_code=400, detail="Master Break supports XAUUSD/GOLD only.")
-
-    broker_symbol = await _resolve_symbol_for_account(account, normalized_symbol)
-    if not is_gold_request(broker_symbol) and not is_gold_request(normalized_symbol):
-        raise HTTPException(status_code=400, detail="Master Break supports XAUUSD/GOLD only.")
-
-    symbol_spec = await _symbol_spec_for_account(account, broker_symbol)
-    master_candles, exec_candles = await _load_master_break_seed_candles(db, account, broker_symbol, settings)
-    try:
-        snapshot = master_break_manager.start_run(
-            user_id=str(user["_id"]),
-            account=account,
-            requested_symbol=normalized_symbol,
-            broker_symbol=broker_symbol,
-            display_symbol=display_symbol(normalized_symbol, broker_symbol),
-            settings=settings,
-            master_candles=master_candles,
-            exec_candles=exec_candles,
-            point_size=point_size_from_symbol_spec(symbol_spec) or float(symbol_spec.get("point") or 0.01),
-            price_digits=digits_from_symbol_spec(symbol_spec),
-            db=db,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    await _ensure_market_data_stream(db, str(user["_id"]))
-    await live_state_hub.push_snapshot(db, str(user["_id"]))
-    return snapshot
-
-
-@app.post("/master-break/stop")
-async def stop_master_break(data: MasterBreakStopIn, user=Depends(get_current_user), db=Depends(get_db)):
-    account = await _assert_account_async(user, db)
-    broker_symbol = await _resolve_symbol_for_account(account, data.symbol)
-    result = master_break_manager.stop_run(broker_symbol, str(user["_id"]), account_db_id=account.get("_id"), db=db)
-    await _ensure_market_data_stream(db, str(user["_id"]))
-    await live_state_hub.push_snapshot(db, str(user["_id"]))
-    return result
-
-
-@app.get("/master-break/active")
-async def get_master_break_active(user=Depends(get_current_user)):
-    return {"runs": master_break_manager.snapshot_for_user(str(user["_id"]))}
-
-
-@app.get("/master-break/settings", response_model=MasterBreakSettingsOut)
-async def get_master_break_settings(user=Depends(get_current_user)):
-    settings = _load_master_break_settings(user)
-    return MasterBreakSettingsOut(**settings.to_dict())
-
-
-@app.put("/master-break/settings", response_model=MasterBreakSettingsOut)
-async def update_master_break_settings(
-    data: MasterBreakSettingsIn,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    try:
-        settings = await _persist_master_break_settings(db, user, data.model_dump())
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return MasterBreakSettingsOut(**settings.to_dict())
-
-
-@app.post("/master-break/backtest")
-async def run_master_break_backtest(data: MasterBreakBacktestIn, user=Depends(get_current_user), db=Depends(get_db)):
-    account = await _assert_account_async(user, db)
-    if _normalize_market_type(account.get("market_type")) != MARKET_INTERNATIONAL:
-        raise HTTPException(status_code=400, detail="Master Break backtest is available for international MT5 accounts only.")
-
-    try:
-        settings = _resolve_master_break_settings(
-            user,
-            risk_amount=data.risk_amount,
-            master_timeframe=data.master_timeframe,
-            exec_timeframe=data.exec_timeframe,
-            breakeven_r=data.breakeven_r,
-            targets=[item.model_dump() for item in data.targets] if data.targets is not None else None,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    normalized_symbol = normalize_symbol(data.symbol or "XAUUSD")
-    if not is_gold_request(normalized_symbol):
-        raise HTTPException(status_code=400, detail="Master Break supports XAUUSD/GOLD only.")
-
-    from_time = _parse_backtest_day(data.from_date)
-    to_time = _parse_backtest_day(data.to_date)
-    if len(str(data.to_date).strip()) <= 10:
-        to_time = to_time.replace(hour=23, minute=59, second=59)
-    if to_time <= from_time:
-        raise HTTPException(status_code=400, detail="to_date must be after from_date.")
-
-    broker_symbol = await _resolve_symbol_for_account(account, normalized_symbol)
-    symbol_spec = await _symbol_spec_for_account(account, broker_symbol) or {}
-    point = point_size_from_symbol_spec(symbol_spec)
-    if not point or point <= 0:
-        raw_point = symbol_spec.get("point")
-        if raw_point is None:
-            raw_point = symbol_spec.get("tickSize")
-        try:
-            point = float(raw_point) if raw_point is not None else 0.01
-        except (TypeError, ValueError):
-            point = 0.01
-    if point <= 0:
-        point = 0.01
-
-    master_warmup = from_time - timedelta(seconds=max(timeframe_seconds(settings.master_timeframe) * 8, 3600))
-    master_candles = await get_backtest_candles(
-        db,
-        account,
-        broker_symbol,
-        master_warmup,
-        to_time,
-        timeframe=settings.master_timeframe,
-    )
-    exec_candles = await get_backtest_candles(
-        db,
-        account,
-        broker_symbol,
-        from_time,
-        to_time,
-        timeframe=settings.exec_timeframe,
-    )
-    logger.info(
-        "Master Break backtest candles symbol=%s master_tf=%s master=%s exec_tf=%s exec=%s "
-        "master_sample=%s",
-        broker_symbol,
-        settings.master_timeframe,
-        len(master_candles),
-        settings.exec_timeframe,
-        len(exec_candles),
-        [
-            datetime.fromtimestamp(int(c["time"]), tz=timezone.utc).isoformat()
-            if isinstance(c.get("time"), (int, float))
-            else str(c.get("time"))
-            for c in (master_candles or [])[:8]
-        ],
-    )
-    if len(master_candles) < 2 or len(exec_candles) < 2:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Not enough candles for Master Break backtest. "
-                f"master={len(master_candles)} (need ≥2), exec={len(exec_candles)} (need ≥2)."
-            ),
-        )
-
-    try:
-        simulation = simulate_master_break_backtest(
-            {**symbol_spec, "symbol": broker_symbol},
-            master_candles,
-            exec_candles,
-            settings,
-            point,
-            range_start=from_time,
-            range_end=to_time,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.exception("Master Break backtest simulation failed symbol=%s", broker_symbol)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Master Break backtest failed: {type(exc).__name__}: {exc}",
-        ) from exc
-
-    result_id = await run_sync(
-        save_master_break_backtest_result,
-        db,
-        user_id=user["_id"],
-        account_id=account["_id"],
-        symbol=broker_symbol,
-        from_date=str(data.from_date)[:10],
-        to_date=str(data.to_date)[:10],
-        settings=settings.to_dict(),
-        summary=simulation.get("summary") or {},
-        trades=simulation.get("trades") or [],
-        rolls=simulation.get("rolls") or [],
-        master_rows=simulation.get("master_rows") or [],
-        extra={
-            "requested_symbol": normalized_symbol,
-            "broker_symbol": broker_symbol,
-            "display_symbol": display_symbol(normalized_symbol, broker_symbol),
-            "strategy_type": MASTER_BREAK_STRATEGY_TYPE,
-        },
-    )
-    detail = await run_sync(get_master_break_backtest, db, user["_id"], result_id)
-    return detail or {
-        "id": str(result_id),
-        "backtest_id": str(result_id),
-        "summary": simulation.get("summary") or {},
-        "trades": simulation.get("trades") or [],
-        "rolls": simulation.get("rolls") or [],
-        "master_rows": simulation.get("master_rows") or [],
-        "settings": settings.to_dict(),
-    }
-
-
-@app.get("/master-break/backtests")
-async def list_master_break_backtests(
-    limit: int = Query(default=20, ge=1, le=50),
-    cursor: Optional[str] = Query(default=None),
-    user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    return await run_sync(list_master_break_backtests_page, db, user["_id"], limit=limit, cursor=cursor)
-
-
-@app.get("/master-break/backtest/{backtest_id}")
-async def get_master_break_backtest_detail(backtest_id: str, user=Depends(get_current_user), db=Depends(get_db)):
-    try:
-        backtest_oid = parse_object_id(backtest_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid backtest id")
-    doc = await run_sync(get_master_break_backtest, db, user["_id"], backtest_oid)
-    if not doc:
-        raise HTTPException(status_code=404, detail="Master Break backtest not found")
-    return doc
-
-
-@app.delete("/master-break/backtest/{backtest_id}")
-async def remove_master_break_backtest(backtest_id: str, user=Depends(get_current_user), db=Depends(get_db)):
-    try:
-        backtest_oid = parse_object_id(backtest_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid backtest id")
-    deleted = await run_sync(delete_master_break_backtest, db, user["_id"], backtest_oid)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Master Break backtest not found")
-    return {"deleted": True, "backtest_id": backtest_id}
-
-
-@app.get("/master-break/backtest/{backtest_id}/trades")
-async def list_master_break_backtest_trades(
-    backtest_id: str,
-    limit: int = Query(default=20, ge=1, le=100),
-    cursor: Optional[str] = Query(default=None),
-    user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    try:
-        backtest_oid = parse_object_id(backtest_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid backtest id")
-    page = await run_sync(
-        list_master_break_trades_page,
-        db,
-        user["_id"],
-        backtest_oid,
-        limit=limit,
-        cursor=cursor,
-    )
-    if page is None:
-        raise HTTPException(status_code=404, detail="Master Break backtest not found")
-    return page
-
-
-@app.post("/structure/unmitigated-swings")
-async def structure_unmitigated_swings_analyze(
-    data: UnmitigatedSwingsQueryIn,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    if _normalize_market_type(user.get("selected_market")) != "INTERNATIONAL":
-        raise HTTPException(status_code=400, detail="Unmitigated swings require an international MT5 account")
-    try:
-        account_oid = parse_object_id(data.account_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid account id")
-    account = await db.meta_accounts.find_one_async({"_id": account_oid, "user_id": user["_id"]})
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-    if str(account.get("market_type") or "INTERNATIONAL").upper() != "INTERNATIONAL":
-        raise HTTPException(status_code=400, detail="Unmitigated swings require an international MT5 account")
-
-    normalized_symbol = str(data.symbol or "").upper().strip()
-    if not normalized_symbol:
-        raise HTTPException(status_code=400, detail="Symbol is required")
-
-    mid = None
-    try:
-        broker_symbol = await _resolve_symbol_for_account(account, normalized_symbol)
-        try:
-            price = await metaapi_service.get_symbol_price(account["api_token"], account["account_id"], broker_symbol)
-            mid = _mid_price(price.get("bid"), price.get("ask"))
-        except Exception:
-            mid = None
-        result = await analyze_unmitigated_swings(
-            db,
-            account,
-            broker_symbol=broker_symbol,
-            requested_symbol=normalized_symbol,
-            display=display_symbol(normalized_symbol, broker_symbol),
-            timeframe=data.timeframe,
-            swing_count=int(data.swing_count),
-            mid_price=float(mid) if mid is not None else None,
-        )
-    except LocalMT5Error:
-        raise
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.exception(
-            "Unmitigated swings analyze failed | user=%s account=%s symbol=%s",
-            user["_id"],
-            data.account_id,
-            normalized_symbol,
-        )
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return result
-
-
-@app.post("/structure/unmitigated-swings/execute")
-async def structure_unmitigated_swings_execute(
-    data: UnmitigatedSwingsExecuteIn,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    if _normalize_market_type(user.get("selected_market")) != "INTERNATIONAL":
-        raise HTTPException(status_code=400, detail="Unmitigated swings require an international MT5 account")
-    try:
-        account_oid = parse_object_id(data.account_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid account id")
-    account = await db.meta_accounts.find_one_async({"_id": account_oid, "user_id": user["_id"]})
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-    if str(account.get("market_type") or "INTERNATIONAL").upper() != "INTERNATIONAL":
-        raise HTTPException(status_code=400, detail="Unmitigated swings require an international MT5 account")
-
-    normalized_symbol = str(data.symbol or "").upper().strip()
-    if not normalized_symbol:
-        raise HTTPException(status_code=400, detail="Symbol is required")
-    highs = [float(v) for v in (data.highs or [])]
-    lows = [float(v) for v in (data.lows or [])]
-    if not highs and not lows:
-        raise HTTPException(status_code=400, detail="At least one high or low level is required")
-
-    try:
-        broker_symbol = await _resolve_symbol_for_account(account, normalized_symbol)
-        symbol_spec = await _symbol_spec_for_account(account, broker_symbol)
-        price = await metaapi_service.get_symbol_price(account["api_token"], account["account_id"], broker_symbol)
-        mid = _mid_price(price.get("bid"), price.get("ask"))
-        if mid is None or float(mid) <= 0:
-            raise HTTPException(status_code=400, detail="Live mid price is unavailable")
-        point = point_size_from_symbol_spec(symbol_spec)
-        digits = digits_from_symbol_spec(symbol_spec)
-        seed = await seed_recent_candles(db, account, broker_symbol, "M1", limit=40)
-        result = await execute_unmitigated_swings(
-            db,
-            user,
-            account,
-            broker_symbol=broker_symbol,
-            requested_symbol=normalized_symbol,
-            display=display_symbol(normalized_symbol, broker_symbol),
-            structure_timeframe=data.structure_timeframe,
-            highs=highs,
-            lows=lows,
-            risk_amount=float(data.risk_amount),
-            mid_price=float(mid),
-            point_size=point,
-            price_digits=digits,
-            seed_candles=seed,
-        )
-    except HTTPException:
-        raise
-    except LocalMT5Error as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.exception(
-            "Unmitigated swings execute failed | user=%s account=%s symbol=%s",
-            user["_id"],
-            data.account_id,
-            normalized_symbol,
-        )
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    await _ensure_market_data_stream(db, str(user["_id"]), force=True)
-    await live_state_hub.push_snapshot(db, str(user["_id"]))
-    return result
-
-
-@app.get("/structure/unmitigated-swings/session/{session_id}")
-async def structure_unmitigated_swings_session(
-    session_id: str,
-    user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    try:
-        session_oid = parse_object_id(session_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid session id")
-    session = await get_structure_session(db, user["_id"], session_oid)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return session
-
-
-@app.get("/structure/unmitigated-swings/sessions")
-async def structure_unmitigated_swings_sessions(
-    account_id: Optional[str] = Query(default=None),
-    limit: int = Query(default=20, ge=1, le=50),
-    user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    account_oid = None
-    if account_id:
-        try:
-            account_oid = parse_object_id(account_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid account id")
-        account = await db.meta_accounts.find_one_async({"_id": account_oid, "user_id": user["_id"]})
-        if not account:
-            raise HTTPException(status_code=404, detail="Account not found")
-    return await list_structure_sessions(db, user["_id"], account_id=account_oid, limit=limit)
-
-
-@app.get("/structure/unmitigated-swings/active")
-async def structure_unmitigated_swings_active(
-    account_id: str = Query(...),
-    user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    try:
-        account_oid = parse_object_id(account_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid account id")
-    account = await db.meta_accounts.find_one_async({"_id": account_oid, "user_id": user["_id"]})
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-    session = await get_active_structure_session(db, user["_id"], account_oid)
-    return {"session": session}
-
-
-@app.post("/scheduled-trades", response_model=ScheduledTradeOut)
-async def create_scheduled_trade(data: ScheduledTradeCreateIn, user=Depends(get_current_user), db=Depends(get_db)):
-    if _normalize_market_type(user.get("selected_market")) != "INTERNATIONAL":
-        raise HTTPException(status_code=400, detail="Scheduled trades require an international MT5 account")
-    account = await _assert_account_async(user, db)
-    symbol = str(data.symbol or "").strip().upper()
-    if not symbol:
-        raise HTTPException(status_code=400, detail="Symbol is required")
-    try:
-        broker_symbol = await _resolve_symbol_for_account(account, symbol)
-        symbol_spec = await _symbol_spec_for_account(account, broker_symbol)
-        price = await metaapi_service.get_symbol_price(account["api_token"], account["account_id"], broker_symbol)
-    except LocalMT5Error as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    bid = price.get("bid")
-    ask = price.get("ask")
-    mid = _mid_price(bid, ask)
-    if mid is None or float(mid) <= 0:
-        raise HTTPException(status_code=400, detail="Live mid price is unavailable")
-    risk_amount = float(data.risk_amount) if data.risk_amount is not None else float(account.get("risk_amount") or 0)
-    if risk_amount <= 0:
-        raise HTTPException(status_code=400, detail="risk_amount must be positive")
-    point = point_size_from_symbol_spec(symbol_spec)
-    digits = digits_from_symbol_spec(symbol_spec)
-    try:
-        seed = await seed_recent_candles(db, account, broker_symbol, data.timeframe, limit=40)
-        created = await scheduled_trade_manager.create_schedule(
-            db,
-            user,
-            account,
-            symbol=symbol,
-            broker_symbol=broker_symbol,
-            timeframe=data.timeframe,
-            level=float(data.level),
-            risk_amount=risk_amount,
-            target=float(data.target) if data.target is not None else None,
-            retryable_order=bool(data.retryable_order),
-            mid_price=float(mid),
-            point_size=point,
-            price_digits=digits,
-            max_signal_candle_pips=data.max_signal_candle_pips,
-            seed_candles=seed,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    await _ensure_market_data_stream(db, str(user["_id"]), force=True)
-    await live_state_hub.push_snapshot(db, str(user["_id"]))
-    return ScheduledTradeOut(**created)
-
-
-@app.get("/scheduled-trades", response_model=List[ScheduledTradeOut])
-async def list_scheduled_trades(
-    include_terminal: bool = Query(default=True),
-    user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    account = await _assert_account_async(user, db)
-    rows = await scheduled_trade_manager.list_schedules(
-        db,
-        user["_id"],
-        account_id=account["_id"],
-        include_terminal=include_terminal,
-    )
-    return [ScheduledTradeOut(**row) for row in rows]
-
-
-@app.post("/scheduled-trades/{schedule_id}/cancel", response_model=ScheduledTradeOut)
-async def cancel_scheduled_trade(schedule_id: str, user=Depends(get_current_user), db=Depends(get_db)):
-    try:
-        schedule_oid = parse_object_id(schedule_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid schedule id")
-    account = await _assert_account_async(user, db)
-    try:
-        row = await scheduled_trade_manager.cancel_schedule(db, user, account, schedule_oid)
-    except ValueError as exc:
-        detail = str(exc)
-        status = 404 if "not found" in detail.lower() else 400
-        raise HTTPException(status_code=status, detail=detail) from exc
-    await live_state_hub.push_snapshot(db, str(user["_id"]))
-    return ScheduledTradeOut(**row)
-
-
-@app.get("/scheduled-trades/{schedule_id}/events", response_model=List[ScheduledTradeEventOut])
-async def scheduled_trade_events(schedule_id: str, user=Depends(get_current_user), db=Depends(get_db)):
-    try:
-        schedule_oid = parse_object_id(schedule_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid schedule id")
-    try:
-        events = await scheduled_trade_manager.list_events(db, user["_id"], schedule_oid)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return [ScheduledTradeEventOut(**event) for event in events]
 
 
 @app.get("/notifications", response_model=List[NotificationOut])
@@ -6233,8 +4974,6 @@ async def cancel_pending_order(order_id: str, user=Depends(get_current_user), db
         symbol=order["symbol"],
         broker_info=order.get("broker_info") or broker_info,
     )
-    if order.get("scheduled_trade_id"):
-        await scheduled_trade_manager.sync_linked_orders(db, user["_id"], account)
     await live_state_hub.push_snapshot(db, str(user["_id"]))
     return {"ok": True}
 
@@ -6343,8 +5082,6 @@ async def close_position(order_id: str, data: ClosePositionIn, user=Depends(get_
         symbol=order["symbol"],
         broker_info=order.get("broker_info") or broker_info,
     )
-    if status == "CLOSED" and order.get("scheduled_trade_id"):
-        await scheduled_trade_manager.notify_order_user_exit(db, {**order, **update_doc})
     await live_state_hub.push_snapshot(db, str(user["_id"]))
     return {"ok": True, "order_type": "MARKET"}
 

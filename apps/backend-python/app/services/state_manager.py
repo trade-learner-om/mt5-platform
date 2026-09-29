@@ -72,9 +72,6 @@ class LiveStateHub:
         notifications = await db.notifications.find_async({"user_id": user_oid})
         notifications.sort(key=lambda item: item.get("created_at") or datetime.min, reverse=True)
         notifications = notifications[:200]
-        scheduled_trades = await db.scheduled_trades.find_async({"user_id": user_oid})
-        scheduled_trades.sort(key=lambda item: item.get("updated_at") or datetime.min, reverse=True)
-        scheduled_trades = scheduled_trades[:100]
         indian_market = await run_sync(indian_market_stream_manager.build_market_overview, user_id)
         invalid_watchlist_symbols = market_data_stream.get_invalid_watchlist_symbols(user_id)
         payload = {
@@ -169,38 +166,6 @@ class LiveStateHub:
                     "broker_info": notification.get("broker_info"),
                 }
                 for notification in notifications
-            ],
-            "scheduled_trades": [
-                {
-                    "id": str(item["_id"]),
-                    "account_id": str(item.get("account_id") or "") or None,
-                    "symbol": item.get("symbol"),
-                    "timeframe": item.get("timeframe"),
-                    "level": item.get("level"),
-                    "side": item.get("side"),
-                    "risk_amount": item.get("risk_amount"),
-                    "target": item.get("target"),
-                    "max_signal_candle_pips": item.get("max_signal_candle_pips"),
-                    "retryable_order": bool(item.get("retryable_order")),
-                    "retry_used": bool(item.get("retry_used")),
-                    "status": item.get("status"),
-                    "entry": item.get("entry"),
-                    "stop_loss": item.get("stop_loss"),
-                    "quantity": item.get("quantity"),
-                    "order_id": str(item["order_id"]) if item.get("order_id") else None,
-                    "retry_order_id": str(item["retry_order_id"]) if item.get("retry_order_id") else None,
-                    "placement_fallback_reason": item.get("placement_fallback_reason"),
-                    "placement_order_type": item.get("placement_order_type"),
-                    "last_error": item.get("last_error"),
-                    "broker_info": item.get("broker_info") or {},
-                    "created_at": _iso_timestamp(item.get("created_at")),
-                    "updated_at": _iso_timestamp(item.get("updated_at")),
-                    "armed_at": _iso_timestamp(item.get("armed_at")),
-                    "placed_at": _iso_timestamp(item.get("placed_at")),
-                    "filled_at": _iso_timestamp(item.get("filled_at")),
-                    "exited_at": _iso_timestamp(item.get("exited_at")),
-                }
-                for item in scheduled_trades
             ],
         }
 
