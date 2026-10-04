@@ -100,9 +100,13 @@ Manual runtime events include:
 
 `GET /orders/{order_id}/events` returns related parent/child activity with IST timestamps.
 
+## Trading ticket tabs
+
+The trading ticket has two tabs. **SL Order Desk** is the default. **Manual** restores SL, Limit, and Market placement, including conditional stops, Limit Cancel At, the candle detector, and the market-closed pending-order dialog.
+
 ## Candle SL order desk
 
-The trading screen ticket places **SL** orders from the last completed M1, M5, or M15 candle (default M5). `POST /orders/quick/preview` returns that candle's open, high, low, and close before a side is chosen. After Buy or Sell:
+The SL Order Desk tab places **SL** orders from the last completed M1, M5, or M15 candle (default M5). `POST /orders/quick/preview` returns that candle's open, high, low, and close before a side is chosen. The quote does not overwrite entry or stop while the Manual tab is active. After Buy or Sell:
 
 - Buy entry is high + 1 tick and stop is low − 1 tick
 - Sell entry is low − 1 tick and stop is high + 1 tick
@@ -127,7 +131,9 @@ Open positions (`FILLED`, `POSITION_OPEN`, `PARTIALLY_CLOSED`) use the same rout
 
 Events: `ORDER_MODIFIED`, `ORDER_REPLACED`, `ORDER_CANCELLED_FOR_MODIFY`, or `ORDER_UPDATED` depending on path.
 
-The trading desk Edit action loads a Placed or In Position row back into the ticket. Web, Android, and iOS still expose Edit on pending rows elsewhere.
+The trading desk Edit action loads a Placed or In Position row back into the ticket. A Limit, Market, or conditional order opens the Manual tab. A plain SL order stays on the SL Order Desk. Web, Android, and iOS still expose Edit on pending rows elsewhere.
+
+Manual placement uses `POST /orders` with the selected order type. When the broker reports the market closed, the ticket can save the order locally as `DEFERRED_MARKET_OPEN` until Monday 04:30 IST. Those rows appear under Pending Orders on the Positions page.
 
 ## Local MT5 Notes
 
